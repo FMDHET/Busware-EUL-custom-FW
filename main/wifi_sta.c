@@ -22,6 +22,7 @@ static EventGroupHandle_t s_wifi_evt;
 static int  s_retry = 0;
 static char s_ip[16];
 static bool s_started = false;
+static bool s_ever_connected = false;   // true, sobald wir einmal eine IP hatten
 static esp_event_handler_instance_t s_h_wifi, s_h_ip;
 
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -32,12 +33,21 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         wifi_event_sta_disconnected_t *e = (wifi_event_sta_disconnected_t *)data;
         s_ip[0] = '\0';
         xEventGroupClearBits(s_wifi_evt, WIFI_CONNECTED_BIT);
-        if (s_retry < WIFI_MAX_RETRY) {
+        if (s_ever_connected) {
+            // Laufzeit-Drop nach schon erfolgreicher Verbindung: NIE aufgeben.
+            // Der alte WIFI_MAX_RETRY-Deckel liess das Gateway nach einem
+            // WLAN-Schluckauf tot liegen (bis Power-Cycle) - genau die Ursache
+            // der zeitweisen Unerreichbarkeit / fehlenden Feedback-Telegramme.
+            ESP_LOGW(TAG, "disconnected reason=%d, reconnecting (runtime)", e->reason);
+            esp_wifi_connect();
+        } else if (s_retry < WIFI_MAX_RETRY) {
             s_retry++;
             ESP_LOGW(TAG, "disconnected reason=%d, retry %d/%d",
                      e->reason, s_retry, WIFI_MAX_RETRY);
             esp_wifi_connect();
         } else {
+            // Nur beim allerersten Verbinden (Boot) geben wir auf -> Fallback
+            // in den Provisioning-Modus statt endlos gegen falsche Credentials.
             sec_event("wifi_connect_fail",
                       "STA cannot associate after %d retries (last reason=%d)",
                       s_retry, e->reason);
@@ -48,6 +58,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&e->ip_info.ip));
         ESP_LOGI(TAG, "got ip: %s", s_ip);
         s_retry = 0;
+        s_ever_connected = true;
         xEventGroupSetBits(s_wifi_evt, WIFI_CONNECTED_BIT);
     }
 }
@@ -81,6 +92,11 @@ esp_err_t wifi_sta_start_and_wait(const char *ssid, const char *pass, TickType_t
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     ESP_ERROR_CHECK(esp_wifi_start());
+    // Kein Modem-Sleep: dieses Gateway muss Einmal-Telegramme (local_push) in
+    // Echtzeit fangen und dauerhaft per TCP erreichbar sein. Der Default
+    // (WIFI_PS_MIN_MODEM) legt den Funk zwischen Beacons schlafen -> Pakete
+    // gehen verloren und die Station wirkt zeitweise "Host unreachable".
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     s_started = true;
 
     ESP_LOGI(TAG, "connecting to '%s' ...", ssid);
