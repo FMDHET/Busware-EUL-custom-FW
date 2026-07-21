@@ -262,7 +262,9 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
         if (!s_clients[i].active) { slot = &s_clients[i]; break; }
     }
-    if (!slot) { xSemaphoreGive(s_slots_mtx); return false; }
+    // Kein freier Slot: spawn_client uebernimmt den Socket selbst (schliesst ihn),
+    // damit der Aufrufer NICHT doppelt close()t (Double-Close -> lwip-Assert).
+    if (!slot) { xSemaphoreGive(s_slots_mtx); close(sock); return false; }
 
     memset(slot, 0, sizeof(*slot));
     slot->sock            = sock;
@@ -377,9 +379,11 @@ static void accept_task(void *arg)
             }
         }
 
+        // spawn_client uebernimmt den Socket in JEDEM Fall (Erfolg: Client-Tasks;
+        // Misserfolg: schliesst selbst). Hier daher KEIN close() mehr - sonst
+        // Double-Close.
         if (!spawn_client(csock, &peer)) {
-            ESP_LOGW(TAG, "no free client slot, dropping");
-            close(csock);
+            ESP_LOGW(TAG, "client abgewiesen (kein Slot / RAM)");
         }
     }
 }
