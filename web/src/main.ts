@@ -114,6 +114,11 @@ function activateTab(name: TabName): void {
     }
 }
 
+function activeTabName(): string {
+    const el = document.querySelector<HTMLButtonElement>('nav.tabs button.active');
+    return el?.dataset.tab ?? '';
+}
+
 function initTabs(): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((btn) => {
         btn.addEventListener('click', () => activateTab(btn.dataset.tab as TabName));
@@ -369,6 +374,7 @@ async function doFactoryReset(): Promise<void> {
 // Live-Polls
 // -----------------------------------------------------------------------------
 async function pollClients(): Promise<void> {
+    if (activeTabName() !== 'status') return;
     try {
         const arr = await api.clients();
         const body = byId('cli_body');
@@ -404,6 +410,7 @@ function rssiQuality(r: number): string {
 }
 
 async function pollStats(): Promise<void> {
+    if (activeTabName() !== 'status') return;
     try {
         const s = await api.stats();
         byId('gwstat').textContent =
@@ -426,7 +433,6 @@ async function pollStats(): Promise<void> {
 const TELE_MAX = 60;
 const DIR_RX = '↓'; // empfangen vom TCM515
 const DIR_TX = '↑'; // an den TCM515 gesendet
-let telSeq = 0;
 
 const RORG_NAMES: Record<number, string> = {
     0xf6: 'RPS', 0xd5: '1BS', 0xa5: '4BS', 0xd2: 'VLD',
@@ -499,39 +505,44 @@ function renderTelegramRow(t: Telegram): string {
     );
 }
 
-async function pollTelegrams(): Promise<void> {
-    try {
-        const j = await api.console(telSeq);
-        telSeq = j.last_seq;
-        if (!j.lines.length) return;
-        const rows: string[] = [];
-        for (const l of j.lines) {
-            const dir = l.line.startsWith('<') ? DIR_RX : l.line.startsWith('>') ? DIR_TX : '';
-            if (!dir) continue;
-            const bytes = frameBytesFromLine(l.line);
-            if (!bytes) continue;
-            const t = decodeEsp3(l.ms, dir, bytes);
-            if (t) rows.push(renderTelegramRow(t));
-        }
-        if (!rows.length) return;
-        const body = byId('tel_body');
-        if (body.querySelector('.hint')) body.innerHTML = '';
-        // neueste oben
-        body.insertAdjacentHTML('afterbegin', rows.reverse().join(''));
-        while (body.children.length > TELE_MAX) body.removeChild(body.lastElementChild!);
-    } catch {
-        // silent
+// Baut aus einem Batch Konsolenzeilen die Telegramm-Zeilen und haengt sie oben
+// an. Wird aus pollConsole gespeist (KEIN eigener HTTP-Poll mehr - sonst wird
+// /api/console doppelt abgefragt und die WebUI ueber die WiFi-Strecke traege).
+function renderTelegramLines(lines: ConsoleLine[]): void {
+    const rows: string[] = [];
+    for (const l of lines) {
+        const dir = l.line.startsWith('<') ? DIR_RX : l.line.startsWith('>') ? DIR_TX : '';
+        if (!dir) continue;
+        const bytes = frameBytesFromLine(l.line);
+        if (!bytes) continue;
+        const t = decodeEsp3(l.ms, dir, bytes);
+        if (t) rows.push(renderTelegramRow(t));
     }
+    if (!rows.length) return;
+    const body = byId('tel_body');
+    if (body.querySelector('.hint')) body.innerHTML = '';
+    body.insertAdjacentHTML('afterbegin', rows.reverse().join(''));
+    while (body.children.length > TELE_MAX) body.removeChild(body.lastElementChild!);
 }
 
 let conSeq = 0;
 let conPaused = false;
 
 async function pollConsole(): Promise<void> {
-    if (conPaused) return;
+    // Nur abfragen, wenn eine Ansicht die Daten wirklich braucht - spart der
+    // WiFi-Strecke und dem kleinen HTTP-Server des ESP32 unnoetige Requests.
+    const tab = activeTabName();
+    if (tab !== 'status' && tab !== 'konsole') return;
     try {
         const j = await api.console(conSeq);
+        conSeq = j.last_seq;
         if (!j.lines.length) return;
+
+        // Telegramm-Tabelle (Status) immer fuellen, unabhaengig von der Pause.
+        renderTelegramLines(j.lines);
+
+        // Rohe Konsole nur schreiben, wenn nicht pausiert.
+        if (conPaused) return;
         const el = byId<HTMLPreElement>('con');
         const chunk = j.lines
             .map((l) => {
@@ -540,7 +551,6 @@ async function pollConsole(): Promise<void> {
             })
             .join('\n');
         el.textContent = el.textContent ? el.textContent + '\n' + chunk : chunk;
-        conSeq = j.last_seq;
         const lines = el.textContent.split('\n');
         if (lines.length > 400) el.textContent = lines.slice(-400).join('\n');
         if (byId<HTMLInputElement>('autoscroll').checked) {
@@ -639,13 +649,11 @@ function init(): void {
 
     void loadState();
     void doScan();
-    setInterval(pollClients, 2000);
-    setInterval(pollStats, 2000);
-    setInterval(pollTelegrams, 1000);
-    setInterval(pollConsole, 500);
+    setInterval(pollClients, 3000);
+    setInterval(pollStats, 3000);
+    setInterval(pollConsole, 1000);
     void pollClients();
     void pollStats();
-    void pollTelegrams();
     void pollConsole();
 }
 
