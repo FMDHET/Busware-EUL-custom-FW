@@ -1,0 +1,15 @@
+{
+  "name": "eul22-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Busware EUL22 configuration portal - built into main/portal_html.h",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

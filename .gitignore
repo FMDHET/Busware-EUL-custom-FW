@@ -1,0 +1,26 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# VS Code (nur user-lokales)
+.vscode/ipch/
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+
+# ESP-IDF / build artefacts
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Web-Toolchain
+web/node_modules/
+web/package-lock.json

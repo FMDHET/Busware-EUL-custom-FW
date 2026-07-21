@@ -1,0 +1,40 @@
+menu "Busware EUL22 Gateway"
+
+    config EUL_DEFAULT_TCP_PORT
+        int "Default TCP server port (Werkseinstellung)"
+        default 5100
+        range 1 65535
+        help
+            Wird bei Factory-Reset und ins NVS als Default geschrieben.
+            5100 = MGW-LAN-Konvention der Eltako HA-Integration
+            (https://github.com/FMDHET/home-assistant-eltako).
+
+    config EUL_MAX_CLIENTS
+        int "Maximum concurrent TCP clients"
+        default 4
+        range 1 8
+
+    config EUL_CLIENT_TX_STREAM_SIZE
+        int "Per-client outgoing stream buffer (bytes)"
+        default 2048
+        range 512 8192
+
+    config EUL_MDNS_HOSTNAME_PREFIX
+        string "mDNS hostname prefix (wird um MAC-suffix ergaenzt)"
+        default "eul-gateway"
+
+    config EUL_AP_SSID_PREFIX
+        string "SoftAP SSID prefix (wird um MAC-suffix ergaenzt)"
+        default "EUL22-Config"
+
+    config EUL_AUTH_TCP_TIMEOUT_MS
+        int "Timeout fuer TCP-AUTH Handshake (ms)"
+        default 3000
+        range 500 30000
+
+    config EUL_AUTH_MAX_FAILS_PER_MIN
+        int "Max fehlgeschlagene AUTH-Versuche pro Client-IP / Minute"
+        default 5
+        range 1 100
+
+endmenu

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EUL22 Konfiguration</title>
+<style>
+:root { color-scheme: light dark; }
+body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:16px auto;padding:0 12px;color:#222}
+h1{font-size:1.3em;margin-top:0}
+fieldset{border:1px solid #ccc;border-radius:6px;padding:12px;margin:12px 0}
+legend{padding:0 6px;font-weight:600}
+label{display:block;margin:6px 0 2px}
+input[type=text],input[type=password],input[type=number],select{width:100%;padding:6px;box-sizing:border-box;font-size:14px}
+button{padding:8px 14px;margin:6px 6px 0 0;border:0;border-radius:4px;background:#0057b7;color:#fff;cursor:pointer;font-size:14px}
+button.danger{background:#a20000}
+button.ghost{background:#eee;color:#222}
+.row{display:flex;gap:8px;align-items:center}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f4f4f4;padding:4px 6px;border-radius:3px;word-break:break-all;font-size:13px}
+.hint{font-size:0.85em;color:#666;margin-top:4px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-weight:600;font-size:13px;color:#555;border-bottom:1px solid #eee;padding:6px 4px}
+td{padding:6px 4px;border-bottom:1px solid #f4f4f4;font-size:13px}
+.pw-wrap{position:relative;display:flex;align-items:center}
+.pw-wrap input{padding-right:40px}
+.pw-eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);background:transparent;color:#666;padding:6px;margin:0;line-height:0;cursor:pointer}
+.pw-eye:hover{color:#000}
+.pw-eye svg{display:block}
+.secret{display:flex;align-items:center;gap:6px;background:#f4f4f4;padding:4px 6px;border-radius:3px;min-height:28px}
+.secret .val{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all;user-select:all}
+.secret .pw-eye{position:static;transform:none;color:#555}
+pre.console{height:280px;overflow:auto;background:#0f0f10;color:#dcdcdc;padding:8px;border-radius:4px;font-size:12px;line-height:1.35;margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all}
+</style>
+</head>
+<body>
+<h1>Busware EUL22</h1>
+<div id="status" class="hint">lade...</div>
+<form id="f">
+  <fieldset><legend>WLAN (Heimnetz)</legend>
+    <label>SSID</label>
+    <div class="row"><select id="ssid_sel" style="flex:1"><option value="">-- Netzwerk waehlen --</option></select>
+      <button type="button" class="ghost" id="btn-scan">Suchen</button></div>
+    <label>oder SSID manuell</label>
+    <input type="text" id="ssid" maxlength="32" autocomplete="off">
+    <label>Passwort <span class="hint">(leer lassen = bisheriges behalten)</span></label>
+    <input type="password" id="pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
+  </fieldset>
+
+  <fieldset><legend>TCP-Bridge (Home Assistant)</legend>
+    <label><input type="checkbox" id="tcp_en"> TCP-Server aktivieren</label>
+    <label>Port</label><input type="number" id="tcp_port" value="5100" min="1" max="65535">
+    <label><input type="checkbox" id="tcp_auth"> AUTH-Token verlangen (empfohlen)</label>
+    <label>Aktueller Token</label>
+    <div class="row"><div id="token" class="secret" style="flex:1"></div>
+      <button type="button" class="ghost" id="btn-regen">Neu erzeugen</button></div>
+    <div class="hint">Handshake: Server sendet <code>HELLO EUL22 v1 AUTH-REQUIRED</code>, Client antwortet mit <code>AUTH &lt;token&gt;</code>.</div>
+    <hr style="border:0;border-top:1px solid #eee;margin:12px 0">
+    <div class="row">
+      <button type="button" class="ghost" id="btn-preset-ha" style="flex:1">Preset: HA-Eltako Integration</button>
+    </div>
+    <div class="hint">Setzt Port 5100 + Auth aus (MGW-LAN-Konvention der <a href="https://github.com/FMDHET/home-assistant-eltako" target="_blank" rel="noopener">Eltako HA-Integration</a>).</div>
+    <div id="ha_yaml_box" style="display:none;margin-top:10px">
+      <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
+      <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;padding:8px;font-size:12px"></pre>
+    </div>
+  </fieldset>
+
+  <fieldset><legend>USB-CDC-Bridge</legend>
+    <label><input type="checkbox" id="usb_en"> USB als transparente ESP3-Bridge aktivieren</label>
+    <div class="hint">Aus Sicherheitsgruenden (CRA) standardmaessig aus.</div>
+  </fieldset>
+
+  <fieldset><legend>Portal-Zugang (STA-Modus)</legend>
+    <label>Benutzer</label><div class="mono">admin</div>
+    <label>Aktuelles Passwort</label>
+    <div id="adminp" class="secret"></div>
+    <div class="hint">Notieren - im STA-Modus ist das Portal nur mit diesem Login erreichbar.</div>
+  </fieldset>
+
+  <button type="button" id="btn-save">Speichern &amp; Neustart</button>
+  <button type="button" class="danger" id="btn-factory">Werkseinstellungen</button>
+</form>
+
+<fieldset><legend>Verbindungen</legend>
+  <table>
+    <thead><tr><th>Peer</th><th>Uptime</th><th>RX Bytes</th><th>TX Bytes</th><th>Frames</th></tr></thead>
+    <tbody id="cli_body"><tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr></tbody>
+  </table>
+</fieldset>
+
+<fieldset><legend>TCM515-Statistik</legend>
+  <div id="stats" class="mono" style="white-space:pre">-</div>
+</fieldset>
+
+<fieldset><legend>Konsole (Live-Datenverkehr)</legend>
+  <div class="row">
+    <label style="flex:1;margin:0"><input type="checkbox" id="autoscroll" checked> Auto-Scroll</label>
+    <button type="button" class="ghost" id="btn-clear">Leeren</button>
+    <button type="button" class="ghost" id="btn-pause">Pause</button>
+  </div>
+  <pre id="con" class="console"></pre>
+  <div class="hint">&lt; TCM = vom Modul empfangen, &gt; ip:port = von diesem Client. Format: hex-Bytes.</div>
+</fieldset>
+
+<!--SCRIPT-->
+</body>
+</html>

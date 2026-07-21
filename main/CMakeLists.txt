@@ -1,0 +1,36 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "config_store.c"
+        "security.c"
+        "enocean_uart.c"
+        "esp3_parser.c"
+        "usb_cdc_gateway.c"
+        "wifi_sta.c"
+        "wifi_ap.c"
+        "captive_dns.c"
+        "tcp_server.c"
+        "http_portal.c"
+        "console_log.c"
+        "mode_mgr.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        esp_driver_uart
+        esp_driver_gpio
+        esp_driver_usb_serial_jtag
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
+        esp_hw_support
+        esp_timer
+        nvs_flash
+        lwip
+        freertos
+        log
+        mbedtls
+        json
+        mdns
+)

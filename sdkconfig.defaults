@@ -1,0 +1,61 @@
+# ---- Target -----------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32c3"
+
+# ---- Console über USB Serial/JTAG ------------------------------------------
+# Fuer Provisioning-Ausgaben (AP-Passwort, Admin-Passwort, IP nach Setup).
+# Wird zur Laufzeit stumm geschaltet, sobald USB-CDC-Bridge aktiv ist.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# ---- FreeRTOS ---------------------------------------------------------------
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# ---- Flash / Partitions -----------------------------------------------------
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- Bootloader -------------------------------------------------------------
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL=2
+
+# TODO (CRA/RED-relevant, Produktion): Secure Boot v2 + Flash Encryption aktivieren.
+# Erfordert Signing-Keys ausserhalb dieses Repos und einmalige eFuse-Programmierung.
+# CONFIG_SECURE_BOOT=y
+# CONFIG_SECURE_BOOT_V2_ENABLED=y
+# CONFIG_SECURE_FLASH_ENC_ENABLED=y
+
+# ---- Compiler ---------------------------------------------------------------
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_COMPILER_WARN_WRITE_STRINGS=y
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+
+# ---- LwIP -------------------------------------------------------------------
+# 20 Sockets, damit httpd (10) + TCP-Bridge-Listen + n Clients + mDNS + evt.
+# TIME_WAIT-Ueberhaenge alle Platz haben. Zu knapp -> Connection-Reset beim
+# naechsten Accept.
+CONFIG_LWIP_MAX_SOCKETS=20
+CONFIG_LWIP_SO_REUSE=y
+CONFIG_LWIP_TCP_KEEPALIVE=y
+
+# ---- WiFi Buffer ------------------------------------------------------------
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER=y
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=16
+
+# ---- HTTP Server ------------------------------------------------------------
+CONFIG_HTTPD_MAX_URI_HANDLERS=16
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# ---- App-Defaults -----------------------------------------------------------
+CONFIG_EUL_DEFAULT_TCP_PORT=5100
+CONFIG_EUL_MAX_CLIENTS=4
+CONFIG_EUL_CLIENT_TX_STREAM_SIZE=2048
+CONFIG_EUL_MDNS_HOSTNAME_PREFIX="eul-gateway"
+CONFIG_EUL_AP_SSID_PREFIX="EUL22-Config"
+CONFIG_EUL_AUTH_TCP_TIMEOUT_MS=3000
+CONFIG_EUL_AUTH_MAX_FAILS_PER_MIN=5
