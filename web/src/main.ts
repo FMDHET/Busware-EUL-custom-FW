@@ -419,6 +419,111 @@ async function pollStats(): Promise<void> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Telegramm-Feed: dekodiert die ESP3-Frames aus dem Konsolen-Stream und zeigt
+// sie im Status-Reiter als Tabelle (Absender / RORG / Daten / dBm).
+// -----------------------------------------------------------------------------
+const TELE_MAX = 60;
+const DIR_RX = '↓'; // empfangen vom TCM515
+const DIR_TX = '↑'; // an den TCM515 gesendet
+let telSeq = 0;
+
+const RORG_NAMES: Record<number, string> = {
+    0xf6: 'RPS', 0xd5: '1BS', 0xa5: '4BS', 0xd2: 'VLD',
+    0xd1: 'MSC', 0xa6: 'ADT', 0xd4: 'UTE',
+};
+
+interface Telegram {
+    ms: number;
+    dir: string;
+    rorg: string;
+    sender: string;
+    data: string;
+    dbm: number | null;
+}
+
+function toHex(arr: number[]): string {
+    return arr.map((x) => x.toString(16).padStart(2, '0')).join(' ');
+}
+
+function fmtEnoceanId(arr: number[]): string {
+    return arr.map((x) => x.toString(16).padStart(2, '0').toUpperCase()).join('-');
+}
+
+// Hex-Bytes aus einer Konsolenzeile "<prefix> : aa bb cc (NB)" ziehen.
+function frameBytesFromLine(line: string): number[] | null {
+    const ci = line.indexOf(' : ');
+    if (ci < 0) return null;
+    const bytes: number[] = [];
+    for (const tok of line.slice(ci + 3).trim().split(/\s+/)) {
+        if (/^[0-9a-fA-F]{2}$/.test(tok)) bytes.push(parseInt(tok, 16));
+        else break; // "(14B)" oder "..." beendet den Hex-Teil
+    }
+    return bytes.length ? bytes : null;
+}
+
+// Minimaler ESP3-Parser (nur so weit wie fuer die Anzeige noetig).
+function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
+    if (b.length < 7 || b[0] !== 0x55) return null;
+    const dataLen = (b[1] << 8) | b[2];
+    const optLen = b[3];
+    const type = b[4];
+    const data = b.slice(6, 6 + dataLen);
+    const opt = b.slice(6 + dataLen, 6 + dataLen + optLen);
+    if (data.length < dataLen) return null;
+
+    if (type !== 1) {
+        // kein RADIO_ERP1 (z.B. RESPONSE 0x02) - Typ + Rohdaten zeigen
+        return { ms, dir, rorg: `Typ 0x${type.toString(16).padStart(2, '0')}`, sender: '—', data: toHex(data), dbm: null };
+    }
+    if (dataLen < 6) return null;
+    const rorg = data[0];
+    const sender = data.slice(dataLen - 5, dataLen - 1);
+    const payload = data.slice(1, dataLen - 5);
+    const dbm = optLen >= 6 && opt.length >= 6 ? -opt[5] : null;
+    const name = RORG_NAMES[rorg] || `0x${rorg.toString(16).padStart(2, '0')}`;
+    return { ms, dir, rorg: name, sender: fmtEnoceanId(sender), data: toHex(payload), dbm };
+}
+
+function renderTelegramRow(t: Telegram): string {
+    const dbm = t.dbm === null ? '' : String(t.dbm);
+    return (
+        '<tr>' +
+        `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${(t.ms / 1000).toFixed(3)}</td>` +
+        `<td data-label="Ri." style="text-align:center">${t.dir}</td>` +
+        `<td data-label="RORG">${escapeHtml(t.rorg)}</td>` +
+        `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</td>` +
+        `<td data-label="Daten" style="font-family:ui-monospace,monospace">${escapeHtml(t.data)}</td>` +
+        `<td data-label="dBm" style="text-align:right">${dbm}</td>` +
+        '</tr>'
+    );
+}
+
+async function pollTelegrams(): Promise<void> {
+    try {
+        const j = await api.console(telSeq);
+        telSeq = j.last_seq;
+        if (!j.lines.length) return;
+        const rows: string[] = [];
+        for (const l of j.lines) {
+            const dir = l.line.startsWith('<') ? DIR_RX : l.line.startsWith('>') ? DIR_TX : '';
+            if (!dir) continue;
+            const bytes = frameBytesFromLine(l.line);
+            if (!bytes) continue;
+            const t = decodeEsp3(l.ms, dir, bytes);
+            if (t) rows.push(renderTelegramRow(t));
+        }
+        if (!rows.length) return;
+        const body = byId('tel_body');
+        if (body.querySelector('.hint')) body.innerHTML = '';
+        // neueste oben
+        body.insertAdjacentHTML('afterbegin', rows.reverse().join(''));
+        while (body.children.length > TELE_MAX) body.removeChild(body.lastElementChild!);
+    } catch {
+        // silent
+    }
+}
+
 let conSeq = 0;
 let conPaused = false;
 
@@ -536,9 +641,11 @@ function init(): void {
     void doScan();
     setInterval(pollClients, 2000);
     setInterval(pollStats, 2000);
+    setInterval(pollTelegrams, 1000);
     setInterval(pollConsole, 500);
     void pollClients();
     void pollStats();
+    void pollTelegrams();
     void pollConsole();
 }
 
