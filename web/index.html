@@ -2,105 +2,410 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>EUL22 Konfiguration</title>
 <style>
-:root { color-scheme: light dark; }
-body{font-family:system-ui,-apple-system,sans-serif;max-width:640px;margin:16px auto;padding:0 12px;color:#222}
-h1{font-size:1.3em;margin-top:0}
-fieldset{border:1px solid #ccc;border-radius:6px;padding:12px;margin:12px 0}
-legend{padding:0 6px;font-weight:600}
-label{display:block;margin:6px 0 2px}
-input[type=text],input[type=password],input[type=number],select{width:100%;padding:6px;box-sizing:border-box;font-size:14px}
-button{padding:8px 14px;margin:6px 6px 0 0;border:0;border-radius:4px;background:#0057b7;color:#fff;cursor:pointer;font-size:14px}
-button.danger{background:#a20000}
-button.ghost{background:#eee;color:#222}
-.row{display:flex;gap:8px;align-items:center}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f4f4f4;padding:4px 6px;border-radius:3px;word-break:break-all;font-size:13px}
-.hint{font-size:0.85em;color:#666;margin-top:4px}
-table{width:100%;border-collapse:collapse}
-th{text-align:left;font-weight:600;font-size:13px;color:#555;border-bottom:1px solid #eee;padding:6px 4px}
-td{padding:6px 4px;border-bottom:1px solid #f4f4f4;font-size:13px}
-.pw-wrap{position:relative;display:flex;align-items:center}
-.pw-wrap input{padding-right:40px}
-.pw-eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);background:transparent;color:#666;padding:6px;margin:0;line-height:0;cursor:pointer}
-.pw-eye:hover{color:#000}
-.pw-eye svg{display:block}
-.secret{display:flex;align-items:center;gap:6px;background:#f4f4f4;padding:4px 6px;border-radius:3px;min-height:28px}
-.secret .val{flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all;user-select:all}
-.secret .pw-eye{position:static;transform:none;color:#555}
-pre.console{height:280px;overflow:auto;background:#0f0f10;color:#dcdcdc;padding:8px;border-radius:4px;font-size:12px;line-height:1.35;margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all}
+:root {
+  color-scheme: light dark;
+  --bg:#fff;
+  --panel:#fafafa;
+  --fg:#222;
+  --hint:#666;
+  --muted:#f0f0f0;
+  --brand:#0057b7;
+  --brand-fg:#fff;
+  --danger:#a20000;
+  --border:#ddd;
+  --accent-focus:rgba(0,87,183,0.25);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1b1b1e;
+    --panel:#232327;
+    --fg:#e6e6e6;
+    --hint:#a0a0a0;
+    --muted:#2b2b2f;
+    --border:#3a3a3f;
+    --accent-focus:rgba(255,255,255,0.15);
+  }
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; background:var(--bg); color:var(--fg); }
+body {
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  font-size:15px;
+  line-height:1.45;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+
+/* --- Header + Tabs --------------------------------------------------- */
+header {
+  padding:12px 16px 8px;
+  border-bottom:1px solid var(--border);
+  background:var(--panel);
+}
+header h1 { margin:0; font-size:1.2em; }
+header .status { font-size:0.85em; color:var(--hint); margin-top:4px; }
+nav.tabs {
+  display:flex;
+  overflow-x:auto;
+  border-bottom:1px solid var(--border);
+  background:var(--panel);
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+nav.tabs::-webkit-scrollbar { display:none; }
+nav.tabs button {
+  flex:1;
+  min-width:80px;
+  background:transparent;
+  color:var(--fg);
+  border:0;
+  border-bottom:3px solid transparent;
+  padding:12px 8px;
+  font-size:14px;
+  font-weight:500;
+  cursor:pointer;
+  transition:color 0.15s, border-color 0.15s;
+  white-space:nowrap;
+}
+nav.tabs button:hover { background:var(--muted); }
+nav.tabs button.active {
+  color:var(--brand);
+  border-bottom-color:var(--brand);
+}
+
+/* --- Main content ---------------------------------------------------- */
+main {
+  flex:1;
+  padding:12px 16px 100px;   /* bottom padding fuer sticky footer */
+  max-width:760px;
+  width:100%;
+  margin:0 auto;
+}
+.tab { display:none; }
+.tab.active { display:block; }
+
+fieldset {
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:12px;
+  margin:0 0 14px;
+  background:var(--panel);
+}
+legend { padding:0 6px; font-weight:600; font-size:0.95em; }
+
+label {
+  display:block;
+  margin:8px 0 3px;
+  font-size:13px;
+  color:var(--hint);
+}
+label.inline {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--fg);
+  font-size:14px;
+  margin:6px 0;
+}
+label.inline input { margin:0; }
+
+input[type=text], input[type=password], input[type=number], select {
+  width:100%;
+  padding:10px 12px;
+  font-size:16px;      /* verhindert iOS-zoom */
+  background:var(--bg);
+  color:var(--fg);
+  border:1px solid var(--border);
+  border-radius:6px;
+  outline:none;
+}
+input:focus, select:focus { border-color:var(--brand); box-shadow:0 0 0 3px var(--accent-focus); }
+
+button {
+  padding:10px 16px;
+  border:0;
+  border-radius:6px;
+  background:var(--brand);
+  color:var(--brand-fg);
+  cursor:pointer;
+  font-size:14px;
+  font-weight:500;
+  min-height:40px;
+  transition:transform 0.05s, background 0.15s;
+}
+button:active { transform:scale(0.97); }
+button.ghost { background:var(--muted); color:var(--fg); }
+button.danger { background:var(--danger); color:#fff; }
+button:disabled { opacity:0.5; cursor:not-allowed; }
+
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.row > * { min-width:0; }
+.row > input, .row > select { flex:1; }
+
+.hint { font-size:0.85em; color:var(--hint); margin-top:4px; }
+.mono {
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--muted);
+  padding:8px 10px;
+  border-radius:4px;
+  word-break:break-all;
+  font-size:13px;
+}
+
+/* --- Password + Secret --- */
+.pw-wrap { position:relative; display:block; }
+.pw-wrap input { padding-right:48px; }
+.pw-eye {
+  position:absolute;
+  right:4px;
+  top:50%;
+  transform:translateY(-50%);
+  background:transparent;
+  color:var(--hint);
+  padding:8px;
+  border:0;
+  cursor:pointer;
+  min-height:32px;
+  min-width:36px;
+  border-radius:4px;
+  line-height:0;
+}
+.pw-eye:hover { color:var(--fg); background:var(--muted); }
+.pw-eye svg { display:block; }
+
+.secret {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  background:var(--muted);
+  padding:6px 8px;
+  border-radius:6px;
+  min-height:38px;
+}
+.secret .val {
+  flex:1;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:13px;
+  word-break:break-all;
+  user-select:all;
+  -webkit-user-select:all;
+}
+.secret .pw-eye { position:static; transform:none; }
+
+/* --- Table (Verbindungen) ------------------------------------------- */
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; font-weight:600; color:var(--hint); border-bottom:1px solid var(--border); padding:8px 6px; font-size:12px; text-transform:uppercase; letter-spacing:0.03em; }
+td { padding:8px 6px; border-bottom:1px solid var(--muted); }
+tr:last-child td { border-bottom:0; }
+
+@media (max-width:520px) {
+  /* Table -> Card layout auf schmalen screens */
+  table.responsive thead { display:none; }
+  table.responsive tr {
+    display:block;
+    padding:8px 0;
+    border-bottom:1px solid var(--border);
+  }
+  table.responsive tr:last-child { border-bottom:0; }
+  table.responsive td {
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    padding:3px 0;
+    border:0;
+    text-align:right !important;
+  }
+  table.responsive td::before {
+    content:attr(data-label);
+    color:var(--hint);
+    font-size:0.85em;
+    font-weight:500;
+    margin-right:12px;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    text-align:left;
+  }
+}
+
+/* --- Konsole -------------------------------------------------------- */
+pre.console {
+  background:#0f0f10;
+  color:#dcdcdc;
+  padding:10px 12px;
+  border-radius:6px;
+  font-size:12px;
+  line-height:1.4;
+  height:60vh;
+  min-height:280px;
+  max-height:520px;
+  overflow:auto;
+  overflow-x:auto;
+  white-space:pre-wrap;
+  word-break:break-all;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  user-select:text;
+  -webkit-user-select:text;
+  tab-size:2;
+  margin:8px 0 0;
+}
+pre.console:focus {
+  outline:2px solid var(--brand);
+  outline-offset:2px;
+}
+
+/* --- Sticky footer -------------------------------------------------- */
+footer.actions {
+  position:sticky;
+  bottom:0;
+  left:0;
+  right:0;
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--border);
+  background:color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  display:flex;
+  gap:8px;
+  justify-content:center;
+  max-width:760px;
+  margin:0 auto;
+}
+footer.actions button {
+  flex:1;
+  min-height:44px;
+}
+footer.actions .save { flex:2; }
+
+/* Sehr schmal: Buttons untereinander */
+@media (max-width:380px) {
+  footer.actions { flex-direction:column; }
+  footer.actions button { min-height:40px; }
+}
+
+/* --- Sonstiges ----------------------------------------------------- */
+hr { border:0; border-top:1px solid var(--border); margin:12px 0; }
+code { background:var(--muted); padding:1px 4px; border-radius:3px; font-size:0.9em; }
+a { color:var(--brand); }
 </style>
 </head>
 <body>
-<h1>Busware EUL22</h1>
-<div id="status" class="hint">lade...</div>
-<form id="f">
-  <fieldset><legend>WLAN (Heimnetz)</legend>
-    <label>SSID</label>
-    <div class="row"><select id="ssid_sel" style="flex:1"><option value="">-- Netzwerk waehlen --</option></select>
-      <button type="button" class="ghost" id="btn-scan">Suchen</button></div>
-    <label>oder SSID manuell</label>
-    <input type="text" id="ssid" maxlength="32" autocomplete="off">
-    <label>Passwort <span class="hint">(leer lassen = bisheriges behalten)</span></label>
-    <input type="password" id="pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
-  </fieldset>
 
-  <fieldset><legend>TCP-Bridge (Home Assistant)</legend>
-    <label><input type="checkbox" id="tcp_en"> TCP-Server aktivieren</label>
-    <label>Port</label><input type="number" id="tcp_port" value="5100" min="1" max="65535">
-    <label><input type="checkbox" id="tcp_auth"> AUTH-Token verlangen (empfohlen)</label>
-    <label>Aktueller Token</label>
-    <div class="row"><div id="token" class="secret" style="flex:1"></div>
-      <button type="button" class="ghost" id="btn-regen">Neu erzeugen</button></div>
-    <div class="hint">Handshake: Server sendet <code>HELLO EUL22 v1 AUTH-REQUIRED</code>, Client antwortet mit <code>AUTH &lt;token&gt;</code>.</div>
-    <hr style="border:0;border-top:1px solid #eee;margin:12px 0">
-    <div class="row">
-      <button type="button" class="ghost" id="btn-preset-ha" style="flex:1">Preset: HA-Eltako Integration</button>
-    </div>
-    <div class="hint">Setzt Port 5100 + Auth aus (MGW-LAN-Konvention der <a href="https://github.com/FMDHET/home-assistant-eltako" target="_blank" rel="noopener">Eltako HA-Integration</a>).</div>
-    <div id="ha_yaml_box" style="display:none;margin-top:10px">
-      <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
-      <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;padding:8px;font-size:12px"></pre>
-    </div>
-  </fieldset>
+<header>
+  <h1>Busware EUL22</h1>
+  <div class="status" id="status">lade...</div>
+</header>
 
-  <fieldset><legend>USB-CDC-Bridge</legend>
-    <label><input type="checkbox" id="usb_en"> USB als transparente ESP3-Bridge aktivieren</label>
-    <div class="hint">Aus Sicherheitsgruenden (CRA) standardmaessig aus.</div>
-  </fieldset>
+<nav class="tabs" id="tabs">
+  <button data-tab="wifi" class="active">WiFi</button>
+  <button data-tab="usb">USB</button>
+  <button data-tab="enocean">EnOcean</button>
+  <button data-tab="konsole">Konsole</button>
+</nav>
 
-  <fieldset><legend>Portal-Zugang (STA-Modus)</legend>
-    <label>Benutzer</label><div class="mono">admin</div>
-    <label>Aktuelles Passwort</label>
-    <div id="adminp" class="secret"></div>
-    <div class="hint">Notieren - im STA-Modus ist das Portal nur mit diesem Login erreichbar.</div>
-  </fieldset>
+<main>
 
-  <button type="button" id="btn-save">Speichern &amp; Neustart</button>
+  <!-- ============================================================== WiFi -->
+  <section class="tab active" id="tab-wifi">
+    <fieldset><legend>WLAN (Heimnetz)</legend>
+      <label>SSID</label>
+      <div class="row">
+        <select id="ssid_sel"><option value="">-- Netzwerk waehlen --</option></select>
+        <button type="button" class="ghost" id="btn-scan">Suchen</button>
+      </div>
+      <label>oder SSID manuell</label>
+      <input type="text" id="ssid" maxlength="32" autocomplete="off">
+      <label>Passwort <span class="hint">(leer = bisheriges behalten)</span></label>
+      <input type="password" id="pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
+    </fieldset>
+
+    <fieldset><legend>Portal-Zugang (STA-Modus)</legend>
+      <label>Benutzer</label><div class="mono">admin</div>
+      <label>Aktuelles Passwort</label>
+      <div id="adminp" class="secret"></div>
+      <div class="hint">Notieren - im STA-Modus ist das Portal nur mit diesem Login erreichbar.</div>
+    </fieldset>
+  </section>
+
+  <!-- =============================================================== USB -->
+  <section class="tab" id="tab-usb">
+    <fieldset><legend>USB-CDC-Bridge</legend>
+      <label class="inline"><input type="checkbox" id="usb_en"> USB als transparente ESP3-Bridge aktivieren</label>
+      <div class="hint">Erlaubt Direkt-Zugriff auf den TCM515 ueber die USB-C-Buchse als virtuellen COM-Port. Aus Sicherheitsgruenden (CRA) standardmaessig aus.</div>
+    </fieldset>
+
+    <fieldset><legend>Hinweis</legend>
+      <div class="hint">
+        USB-Traffic wird nicht in die Web-Konsole gespiegelt. Zur Diagnose am USB-Kanal
+        lokal <code>pio device monitor</code> oder <code>screen /dev/cu.usbmodemXXXX 460800</code> verwenden.
+      </div>
+    </fieldset>
+  </section>
+
+  <!-- =========================================================== EnOcean -->
+  <section class="tab" id="tab-enocean">
+    <fieldset><legend>TCP-Bridge (Home Assistant / FHEM / ...)</legend>
+      <label class="inline"><input type="checkbox" id="tcp_en"> TCP-Server aktivieren</label>
+      <label>Port</label>
+      <input type="number" id="tcp_port" value="5100" min="1" max="65535">
+      <label class="inline"><input type="checkbox" id="tcp_auth"> AUTH-Token verlangen <span class="hint">(empfohlen)</span></label>
+      <label>Aktueller Token</label>
+      <div class="row">
+        <div id="token" class="secret"></div>
+        <button type="button" class="ghost" id="btn-regen">Neu erzeugen</button>
+      </div>
+      <div class="hint">Handshake: Server sendet <code>HELLO EUL22 v1 AUTH-REQUIRED</code>, Client antwortet mit <code>AUTH &lt;token&gt;</code>.</div>
+      <hr>
+      <button type="button" class="ghost" id="btn-preset-ha">Preset: HA-Eltako Integration</button>
+      <div class="hint">Setzt Port 5100 + Auth aus (MGW-LAN-Konvention der <a href="https://github.com/FMDHET/home-assistant-eltako" target="_blank" rel="noopener">Eltako HA-Integration</a>).</div>
+      <div id="ha_yaml_box" style="display:none;margin-top:10px">
+        <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
+        <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;font-size:12px;padding:10px"></pre>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Aktive Verbindungen</legend>
+      <table class="responsive">
+        <thead>
+          <tr><th>Peer</th><th>Uptime</th><th>RX</th><th>TX</th><th>Frames</th></tr>
+        </thead>
+        <tbody id="cli_body">
+          <tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr>
+        </tbody>
+      </table>
+    </fieldset>
+
+    <fieldset><legend>TCM515-Statistik</legend>
+      <div id="stats" class="mono" style="white-space:pre">-</div>
+    </fieldset>
+  </section>
+
+  <!-- =========================================================== Konsole -->
+  <section class="tab" id="tab-konsole">
+    <fieldset><legend>Live-Datenverkehr</legend>
+      <div class="row" style="margin-bottom:6px">
+        <label class="inline" style="flex:1"><input type="checkbox" id="autoscroll" checked> Auto-Scroll</label>
+        <button type="button" class="ghost" id="btn-copy">Kopieren</button>
+        <button type="button" class="ghost" id="btn-clear">Leeren</button>
+        <button type="button" class="ghost" id="btn-pause">Pause</button>
+      </div>
+      <pre id="con" class="console" tabindex="0" aria-label="Konsole. Klicken oder fokussieren, dann Strg+A um Inhalt zu markieren."></pre>
+      <div class="hint">
+        <code>&lt; TCM</code> = vom Modul empfangen, <code>&gt; ip:port</code> = von diesem Client gesendet.
+        Fokus auf die Konsole (Klick) und <code>Strg+A</code> / <code>Cmd+A</code> markiert nur die Konsole.
+      </div>
+    </fieldset>
+  </section>
+
+</main>
+
+<footer class="actions">
+  <button type="button" class="save" id="btn-save">Speichern &amp; Neustart</button>
   <button type="button" class="danger" id="btn-factory">Werkseinstellungen</button>
-</form>
-
-<fieldset><legend>Verbindungen</legend>
-  <table>
-    <thead><tr><th>Peer</th><th>Uptime</th><th>RX Bytes</th><th>TX Bytes</th><th>Frames</th></tr></thead>
-    <tbody id="cli_body"><tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr></tbody>
-  </table>
-</fieldset>
-
-<fieldset><legend>TCM515-Statistik</legend>
-  <div id="stats" class="mono" style="white-space:pre">-</div>
-</fieldset>
-
-<fieldset><legend>Konsole (Live-Datenverkehr)</legend>
-  <div class="row">
-    <label style="flex:1;margin:0"><input type="checkbox" id="autoscroll" checked> Auto-Scroll</label>
-    <button type="button" class="ghost" id="btn-clear">Leeren</button>
-    <button type="button" class="ghost" id="btn-pause">Pause</button>
-  </div>
-  <pre id="con" class="console"></pre>
-  <div class="hint">&lt; TCM = vom Modul empfangen, &gt; ip:port = von diesem Client. Format: hex-Bytes.</div>
-</fieldset>
+</footer>
 
 <!--SCRIPT-->
 </body>

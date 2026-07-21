@@ -4,7 +4,7 @@
 // eingebettet und dann als C-String in main/portal_html.h abgelegt.
 
 // -----------------------------------------------------------------------------
-// Types (mirror des HTTP-Backends)
+// Types (spiegeln HTTP-Backend)
 // -----------------------------------------------------------------------------
 type Mode = 'provisioning' | 'normal';
 
@@ -18,13 +18,6 @@ interface State {
     tcp_auth_required: boolean;
     tcp_token: string;
     admin_pass: string;
-}
-
-// Aktuelle IP - wir kriegen sie nicht direkt aus /api/state, aber wir kennen
-// das mDNS-Hostname-Pattern; fallback auf window.location.hostname.
-function currentHostForHA(): string {
-    // window.location.host enthaelt ggf. Port - fuer YAML nehmen wir nur host
-    return window.location.hostname;
 }
 
 interface Network {
@@ -70,7 +63,7 @@ interface SaveBody {
 }
 
 // -----------------------------------------------------------------------------
-// Icons (inline, keine externen Requests wegen CRA)
+// Icons
 // -----------------------------------------------------------------------------
 const EYE_OPEN =
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
@@ -97,12 +90,46 @@ function say(text: string): void {
     byId('status').textContent = text;
 }
 
+function currentHost(): string {
+    return window.location.hostname;
+}
+
 // -----------------------------------------------------------------------------
-// Passwort-Input mit Auge-Toggle
+// Tabs
+// -----------------------------------------------------------------------------
+type TabName = 'wifi' | 'usb' | 'enocean' | 'konsole';
+
+function activateTab(name: TabName): void {
+    document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
+        b.classList.toggle('active', b.dataset.tab === name);
+    });
+    document.querySelectorAll<HTMLElement>('.tab').forEach((s) => {
+        s.classList.toggle('active', s.id === `tab-${name}`);
+    });
+    if (location.hash !== `#${name}`) {
+        history.replaceState(null, '', `#${name}`);
+    }
+}
+
+function initTabs(): void {
+    document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((btn) => {
+        btn.addEventListener('click', () => activateTab(btn.dataset.tab as TabName));
+    });
+    const initial = location.hash.replace('#', '') as TabName;
+    if (initial && document.getElementById(`tab-${initial}`)) {
+        activateTab(initial);
+    }
+    window.addEventListener('hashchange', () => {
+        const n = location.hash.replace('#', '') as TabName;
+        if (n && document.getElementById(`tab-${n}`)) activateTab(n);
+    });
+}
+
+// -----------------------------------------------------------------------------
+// Passwort-Inputs mit Auge-Toggle
 // -----------------------------------------------------------------------------
 function wireEyeToggles(): void {
     document.querySelectorAll<HTMLInputElement>('input[data-eye]').forEach((input) => {
-        // Wrap input in .pw-wrap
         const wrap = document.createElement('div');
         wrap.className = 'pw-wrap';
         input.parentNode!.insertBefore(wrap, input);
@@ -125,7 +152,7 @@ function wireEyeToggles(): void {
 }
 
 // -----------------------------------------------------------------------------
-// Secret-Anzeige (readonly Wert, per Klick sichtbar/verborgen)
+// Secret-Anzeige (readonly, per Klick sichtbar/verborgen)
 // -----------------------------------------------------------------------------
 class SecretDisplay {
     private valueEl: HTMLElement;
@@ -157,8 +184,7 @@ class SecretDisplay {
         } else if (this.revealed) {
             this.valueEl.textContent = this.value;
         } else {
-            // Fixe Punkt-Anzahl, unabhaengig von der echten Laenge - so leakt die
-            // Zeichenzahl nicht ueber die Schulter.
+            // Konstante Punkt-Anzahl damit die Zeichenzahl nicht leakt
             this.valueEl.textContent = '••••••••••••';
         }
         this.btn.innerHTML = this.revealed ? EYE_OPEN : EYE_CLOSED;
@@ -195,13 +221,13 @@ const api = {
 // Formatierung
 // -----------------------------------------------------------------------------
 function fmtBytes(n: number): string {
-    const units = ['B', 'KB', 'MB', 'GB'];
+    const u = ['B', 'KB', 'MB', 'GB'];
     let i = 0;
-    while (n >= 1024 && i < units.length - 1) {
+    while (n >= 1024 && i < u.length - 1) {
         n /= 1024;
         i++;
     }
-    return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+    return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 
 function fmtUptime(ms: number): string {
@@ -227,7 +253,7 @@ function escapeHtml(s: string): string {
 }
 
 // -----------------------------------------------------------------------------
-// Form-Handling
+// Form Handling
 // -----------------------------------------------------------------------------
 let tokenDisplay: SecretDisplay;
 let adminDisplay: SecretDisplay;
@@ -241,18 +267,16 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('tcp_auth').checked = s.tcp_auth_required;
         byId<HTMLInputElement>('usb_en').checked = s.usb_enabled;
         tokenDisplay.set(s.tcp_token);
-        adminDisplay.set(s.admin_pass); // im STA-Modus liefert Backend ""
-        // YAML-Snippet initial verstecken, aber wenn Config schon HA-kompatibel
-        // ist (kein Auth) direkt anzeigen.
+        adminDisplay.set(s.admin_pass);
         if (!s.tcp_auth_required && s.tcp_enabled) renderHAYaml();
-        say(`Modus: ${s.mode}, MAC-Suffix ${s.suffix}`);
+        say(`Modus: ${s.mode} · MAC-Suffix ${s.suffix}`);
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
 async function doScan(): Promise<void> {
-    say('scanne...');
+    say('scanne WLAN...');
     try {
         const arr = await api.scan();
         const sel = byId<HTMLSelectElement>('ssid_sel');
@@ -283,17 +307,15 @@ async function doRegenToken(): Promise<void> {
 }
 
 function applyHAPreset(): void {
-    // MGW-LAN-Konvention der Eltako HA-Integration: Port 5100, kein Handshake.
     byId<HTMLInputElement>('tcp_en').checked = true;
     byId<HTMLInputElement>('tcp_port').value = '5100';
     byId<HTMLInputElement>('tcp_auth').checked = false;
     renderHAYaml();
-    say('HA-Eltako Preset gesetzt - nicht vergessen zu speichern');
+    say('HA-Eltako Preset gesetzt · nicht vergessen zu speichern');
 }
 
 function renderHAYaml(): void {
-    // YAML fuer die Eltako-Integration mit device_type: eul_lan
-    const host = currentHostForHA();
+    const host = currentHost();
     const port = parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100;
     const yaml =
         'eltako:\n' +
@@ -310,7 +332,7 @@ function renderHAYaml(): void {
 async function doSave(): Promise<void> {
     const body: SaveBody = {
         tcp_enabled: byId<HTMLInputElement>('tcp_en').checked,
-        tcp_port: parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 9999,
+        tcp_port: parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100,
         tcp_auth_required: byId<HTMLInputElement>('tcp_auth').checked,
         usb_enabled: byId<HTMLInputElement>('usb_en').checked,
     };
@@ -324,17 +346,17 @@ async function doSave(): Promise<void> {
     }
     try {
         await api.save(body);
-        say('gespeichert - Geraet startet neu...');
+        say('gespeichert · Geraet startet neu...');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
 async function doFactoryReset(): Promise<void> {
-    if (!confirm('Wirklich auf Werkseinstellungen zuruecksetzen?')) return;
+    if (!confirm('Wirklich auf Werkseinstellungen zuruecksetzen? Alle Zugangsdaten werden neu erzeugt.')) return;
     try {
         await api.factoryReset();
-        say('reset - neustart');
+        say('reset · neustart');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -355,11 +377,11 @@ async function pollClients(): Promise<void> {
             .map(
                 (c) =>
                     `<tr>` +
-                    `<td class="mono">${escapeHtml(c.peer)}</td>` +
-                    `<td style="text-align:center">${fmtUptime(c.connected_ms)}</td>` +
-                    `<td style="text-align:right">${fmtBytes(c.rx_bytes)}</td>` +
-                    `<td style="text-align:right">${fmtBytes(c.tx_bytes)}</td>` +
-                    `<td style="text-align:center">${c.rx_frames}</td>` +
+                    `<td data-label="Peer" style="font-family:ui-monospace,monospace">${escapeHtml(c.peer)}</td>` +
+                    `<td data-label="Uptime" style="text-align:center">${fmtUptime(c.connected_ms)}</td>` +
+                    `<td data-label="RX" style="text-align:right">${fmtBytes(c.rx_bytes)}</td>` +
+                    `<td data-label="TX" style="text-align:right">${fmtBytes(c.tx_bytes)}</td>` +
+                    `<td data-label="Frames" style="text-align:center">${c.rx_frames}</td>` +
                     `</tr>`
             )
             .join('');
@@ -407,20 +429,77 @@ async function pollConsole(): Promise<void> {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Konsole: Copy / Select-All / Clear / Pause
+// -----------------------------------------------------------------------------
+function selectConsoleContents(): void {
+    const pre = byId('con');
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    const sel = window.getSelection();
+    if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+}
+
+async function copyConsole(): Promise<void> {
+    const text = byId('con').textContent || '';
+    if (!text) {
+        say('Konsole ist leer');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        say(`${text.length} Zeichen kopiert`);
+    } catch {
+        // Fallback: markieren, User macht Strg+C
+        selectConsoleContents();
+        say('Bitte manuell kopieren (Strg+C / Cmd+C)');
+    }
+}
+
 function clearConsole(): void {
     byId('con').textContent = '';
     conSeq = 0;
+    say('Konsole geleert');
 }
 
 function togglePause(): void {
     conPaused = !conPaused;
     byId('btn-pause').textContent = conPaused ? 'Weiter' : 'Pause';
+    say(conPaused ? 'Konsole angehalten' : 'Konsole laeuft');
+}
+
+function wireConsoleKeyboard(): void {
+    // Strg+A / Cmd+A: nur Konsolen-Inhalt selektieren wenn Konsole fokussiert
+    const pre = byId<HTMLPreElement>('con');
+    pre.addEventListener('keydown', (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+            e.preventDefault();
+            selectConsoleContents();
+        }
+    });
+
+    // Wenn der User im Konsole-Tab Strg+A drueckt und die Konsole NICHT den
+    // Fokus hat, trotzdem Konsole selektieren statt der ganzen Seite
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'a') return;
+        const konsoleActive = document.getElementById('tab-konsole')?.classList.contains('active');
+        if (!konsoleActive) return;
+        // Wenn der Fokus in einem Eingabefeld liegt, Standard-Verhalten
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
+        e.preventDefault();
+        selectConsoleContents();
+    });
 }
 
 // -----------------------------------------------------------------------------
 // Boot
 // -----------------------------------------------------------------------------
 function init(): void {
+    initTabs();
     wireEyeToggles();
     tokenDisplay = new SecretDisplay(byId('token'));
     adminDisplay = new SecretDisplay(byId('adminp'));
@@ -431,7 +510,10 @@ function init(): void {
     byId('btn-factory').addEventListener('click', doFactoryReset);
     byId('btn-clear').addEventListener('click', clearConsole);
     byId('btn-pause').addEventListener('click', togglePause);
+    byId('btn-copy').addEventListener('click', copyConsole);
     byId('btn-preset-ha').addEventListener('click', applyHAPreset);
+
+    wireConsoleKeyboard();
 
     void loadState();
     void doScan();
