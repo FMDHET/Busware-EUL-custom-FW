@@ -118,7 +118,11 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddStringToObject(root, "device_name", cfg.device_name);
     cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
     cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
-    // mqtt_pass wird nie ausgeliefert - nur setzbar (leer = unveraendert).
+    // WLAN-/MQTT-Passwort nur im STA-Modus ausliefern (dort schuetzt Basic-Auth
+    // das Portal), damit der Nutzer sein gespeichertes Passwort ansehen kann.
+    // Im offenen AP-Modus (Erst-Setup) niemals Secrets herausgeben.
+    cJSON_AddStringToObject(root, "wifi_pass", s_ap_mode ? "" : cfg.wifi_pass);
+    cJSON_AddStringToObject(root, "mqtt_pass", s_ap_mode ? "" : cfg.mqtt_pass);
     // Admin-Pass nur im AP-Modus einmalig anzeigen. Im STA nur Platzhalter.
     cJSON_AddStringToObject(root, "admin_pass",
                             s_ap_mode ? cfg.admin_pass : "");

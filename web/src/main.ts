@@ -12,6 +12,7 @@ interface State {
     mode: Mode;
     suffix: string;
     wifi_ssid: string;
+    wifi_pass: string;
     usb_enabled: boolean;
     tcp_enabled: boolean;
     tcp_port: number;
@@ -23,6 +24,7 @@ interface State {
     mqtt_host: string;
     mqtt_port: number;
     mqtt_user: string;
+    mqtt_pass: string;
     mqtt_topic: string;
     mqtt_discovery: boolean;
     mqtt_retain: boolean;
@@ -313,6 +315,7 @@ async function loadState(): Promise<void> {
     try {
         const s = await api.state();
         byId<HTMLInputElement>('ssid').value = s.wifi_ssid || '';
+        byId<HTMLInputElement>('pass').value = s.wifi_pass || '';
         byId<HTMLInputElement>('tcp_en').checked = s.tcp_enabled;
         byId<HTMLInputElement>('tcp_port').value = String(s.tcp_port);
         byId<HTMLInputElement>('tcp_auth').checked = s.tcp_auth_required;
@@ -324,6 +327,7 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('mqtt_host').value = s.mqtt_host || '';
         byId<HTMLInputElement>('mqtt_port').value = String(s.mqtt_port || 1883);
         byId<HTMLInputElement>('mqtt_user').value = s.mqtt_user || '';
+        byId<HTMLInputElement>('mqtt_pass').value = s.mqtt_pass || '';
         byId<HTMLInputElement>('mqtt_topic').value = s.mqtt_topic || '';
         apiTokenDisplay.set(s.tcp_token);
         byId<HTMLInputElement>('dev_name').value = s.device_name || '';
