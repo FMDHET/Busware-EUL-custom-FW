@@ -16,6 +16,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
+#include "esp_timer.h"
+#include "wifi_sta.h"
 
 #include "mbedtls/base64.h"
 #include "cJSON.h"
@@ -289,16 +291,27 @@ static esp_err_t h_clients(httpd_req_t *req)
 static esp_err_t h_stats(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
-    char buf[256];
+
+    // Aktueller WLAN-Zustand fuer den Status-Reiter: RSSI (Signalstaerke),
+    // zugewiesene IP und Uptime. RSSI/IP sind nur im STA-Modus gueltig.
+    int rssi = 0;
+    if (esp_wifi_sta_get_rssi(&rssi) != ESP_OK) rssi = 0;
+    const char *ip = wifi_sta_ip_str();
+
+    char buf[320];
     int n = snprintf(buf, sizeof(buf),
         "{\"clients\":%d,"
         "\"tcm_rx_bytes\":%llu,\"tcm_tx_bytes\":%llu,"
-        "\"tcm_rx_frames\":%u,\"tcm_tx_frames\":%u}",
+        "\"tcm_rx_frames\":%u,\"tcm_tx_frames\":%u,"
+        "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu}",
         tcp_server_active_clients(),
         (unsigned long long)enocean_uart_rx_bytes(),
         (unsigned long long)enocean_uart_tx_bytes(),
         (unsigned)enocean_uart_rx_frames(),
-        (unsigned)enocean_uart_tx_frames());
+        (unsigned)enocean_uart_tx_frames(),
+        ip ? ip : "",
+        rssi,
+        (unsigned long long)(esp_timer_get_time() / 1000));
     if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, n);

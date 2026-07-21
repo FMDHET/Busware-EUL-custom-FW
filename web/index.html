@@ -300,7 +300,8 @@ a { color:var(--brand); }
 </header>
 
 <nav class="tabs" id="tabs">
-  <button data-tab="wifi" class="active">WiFi</button>
+  <button data-tab="status" class="active">Status</button>
+  <button data-tab="wifi">WiFi</button>
   <button data-tab="usb">USB</button>
   <button data-tab="enocean">EnOcean</button>
   <button data-tab="konsole">Konsole</button>
@@ -308,8 +309,30 @@ a { color:var(--brand); }
 
 <main>
 
+  <!-- ============================================================ Status -->
+  <section class="tab active" id="tab-status">
+    <fieldset><legend>Gateway</legend>
+      <div id="gwstat" class="mono" style="white-space:pre">lade...</div>
+    </fieldset>
+
+    <fieldset><legend>Aktive Verbindungen</legend>
+      <table class="responsive">
+        <thead>
+          <tr><th>Peer</th><th>Uptime</th><th>RX</th><th>TX</th><th>Frames</th></tr>
+        </thead>
+        <tbody id="cli_body">
+          <tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr>
+        </tbody>
+      </table>
+    </fieldset>
+
+    <fieldset><legend>TCM515-Statistik</legend>
+      <div id="stats" class="mono" style="white-space:pre">-</div>
+    </fieldset>
+  </section>
+
   <!-- ============================================================== WiFi -->
-  <section class="tab active" id="tab-wifi">
+  <section class="tab" id="tab-wifi">
     <fieldset><legend>WLAN (Heimnetz)</legend>
       <label>SSID</label>
       <div class="row">
@@ -365,21 +388,6 @@ a { color:var(--brand); }
         <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
         <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;font-size:12px;padding:10px"></pre>
       </div>
-    </fieldset>
-
-    <fieldset><legend>Aktive Verbindungen</legend>
-      <table class="responsive">
-        <thead>
-          <tr><th>Peer</th><th>Uptime</th><th>RX</th><th>TX</th><th>Frames</th></tr>
-        </thead>
-        <tbody id="cli_body">
-          <tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr>
-        </tbody>
-      </table>
-    </fieldset>
-
-    <fieldset><legend>TCM515-Statistik</legend>
-      <div id="stats" class="mono" style="white-space:pre">-</div>
     </fieldset>
   </section>
 

@@ -40,6 +40,9 @@ interface Stats {
     tcm_tx_bytes: number;
     tcm_rx_frames: number;
     tcm_tx_frames: number;
+    ip: string;
+    rssi: number;
+    uptime_ms: number;
 }
 
 interface ConsoleLine {
@@ -97,7 +100,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'wifi' | 'usb' | 'enocean' | 'konsole';
+type TabName = 'status' | 'wifi' | 'usb' | 'enocean' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -390,13 +393,27 @@ async function pollClients(): Promise<void> {
     }
 }
 
+// RSSI-Einordnung fuer den Status-Reiter. Ein Gateway, das Einmal-Telegramme
+// (local_push) zuverlaessig fangen muss, will >= ~ -70 dBm.
+function rssiQuality(r: number): string {
+    if (!r) return 'n/a';
+    if (r >= -60) return 'sehr gut';
+    if (r >= -70) return 'gut';
+    if (r >= -78) return 'schwach';
+    return 'kritisch';
+}
+
 async function pollStats(): Promise<void> {
     try {
         const s = await api.stats();
+        byId('gwstat').textContent =
+            `IP-Adresse    : ${s.ip || '—'}\n` +
+            `WLAN-Signal   : ${s.rssi ? `${s.rssi} dBm (${rssiQuality(s.rssi)})` : 'n/a'}\n` +
+            `Uptime        : ${fmtUptime(s.uptime_ms)}\n` +
+            `Aktive Clients: ${s.clients}`;
         byId('stats').textContent =
-            `aktive Clients : ${s.clients}\n` +
-            `RX vom TCM515  : ${fmtBytes(s.tcm_rx_bytes)} / ${s.tcm_rx_frames} Frames\n` +
-            `TX an TCM515   : ${fmtBytes(s.tcm_tx_bytes)} / ${s.tcm_tx_frames} Frames`;
+            `RX vom TCM515 : ${fmtBytes(s.tcm_rx_bytes)} / ${s.tcm_rx_frames} Frames\n` +
+            `TX an TCM515  : ${fmtBytes(s.tcm_tx_bytes)} / ${s.tcm_tx_frames} Frames`;
     } catch {
         // silent
     }
