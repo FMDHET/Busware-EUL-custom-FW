@@ -20,6 +20,7 @@
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "wifi_sta.h"
 
 #include "mbedtls/base64.h"
@@ -371,12 +372,13 @@ static esp_err_t h_stats(httpd_req_t *req)
     long long epoch_ms = (tv.tv_sec > 1700000000LL)
         ? ((long long)tv.tv_sec * 1000 + tv.tv_usec / 1000) : 0;
 
-    char buf[384];
+    char buf[448];
     int n = snprintf(buf, sizeof(buf),
         "{\"clients\":%d,"
         "\"tcm_rx_bytes\":%llu,\"tcm_tx_bytes\":%llu,"
         "\"tcm_rx_frames\":%u,\"tcm_tx_frames\":%u,"
-        "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu,\"epoch_ms\":%lld}",
+        "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu,\"epoch_ms\":%lld,"
+        "\"heap_free\":%u,\"heap_max\":%u}",
         tcp_server_active_clients(),
         (unsigned long long)enocean_uart_rx_bytes(),
         (unsigned long long)enocean_uart_tx_bytes(),
@@ -385,7 +387,9 @@ static esp_err_t h_stats(httpd_req_t *req)
         ip ? ip : "",
         rssi,
         (unsigned long long)(esp_timer_get_time() / 1000),
-        epoch_ms);
+        epoch_ms,
+        (unsigned)esp_get_free_heap_size(),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, n);

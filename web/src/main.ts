@@ -59,6 +59,8 @@ interface Stats {
     rssi: number;
     uptime_ms: number;
     epoch_ms: number;
+    heap_free: number;
+    heap_max: number;
 }
 
 interface ConsoleLine {
@@ -586,7 +588,9 @@ async function pollStats(): Promise<void> {
             `IP-Adresse    : ${s.ip || '—'}\n` +
             `WLAN-Signal   : ${s.rssi ? `${s.rssi} dBm (${rssiQuality(s.rssi)})` : 'n/a'}\n` +
             `Uptime        : ${fmtUptime(s.uptime_ms)}\n` +
-            `Aktive Clients: ${s.clients}`;
+            `Aktive Clients: ${s.clients}\n` +
+            `Freier Heap   : ${fmtBytes(s.heap_free)}\n` +
+            `Groesster Block: ${fmtBytes(s.heap_max)}`;
         byId('stats').textContent =
             `RX vom TCM515 : ${fmtBytes(s.tcm_rx_bytes)} / ${s.tcm_rx_frames} Frames\n` +
             `TX an TCM515  : ${fmtBytes(s.tcm_tx_bytes)} / ${s.tcm_tx_frames} Frames`;

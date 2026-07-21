@@ -288,7 +288,7 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
         xSemaphoreGive(s_slots_mtx);
         return false;
     }
-    if (xTaskCreate(client_tx_task, "eul-cli-tx", 2560, slot, 10, NULL) != pdPASS) {
+    if (xTaskCreate(client_tx_task, "eul-cli-tx", 2048, slot, 10, NULL) != pdPASS) {
         EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer TX-Task", slot->peer);
         // RX-Task laeuft schon und raeumt auf, sobald active=false + Socket zu.
         slot->active = false;
