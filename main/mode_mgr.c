@@ -186,15 +186,24 @@ static void net_tick(void *arg)
         }
     }
     if (s_ka_sock >= 0) {
+        // Ziel bevorzugt das Default-Gateway (unicast) - erzeugt Traffic ueber
+        // die Mesh-Uplink-Strecke und haelt den Reverse-Path/die MAC eher aktiv
+        // als ein reiner Broadcast. Fallback: limitierter Broadcast.
+        uint32_t dst = htonl(INADDR_BROADCAST);
+        esp_netif_t *nif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip;
+        if (nif && esp_netif_get_ip_info(nif, &ip) == ESP_OK && ip.gw.addr) {
+            dst = ip.gw.addr;
+        }
         struct sockaddr_in a = {
             .sin_family = AF_INET,
             .sin_port = htons(9),                    // discard-Port
-            .sin_addr.s_addr = htonl(INADDR_BROADCAST),
+            .sin_addr.s_addr = dst,
         };
         static const char ka[] = "EUL22-keepalive";
         sendto(s_ka_sock, ka, sizeof(ka) - 1, 0, (struct sockaddr *)&a, sizeof(a));
     }
-    if (++cnt >= 4) {
+    if (++cnt >= 8) {   // alle ~120s (Tick 15s) Netz-Status ins Event-Log
         cnt = 0;
         int rssi = 0;
         esp_wifi_sta_get_rssi(&rssi);
@@ -269,7 +278,7 @@ static void run_normal(const eul_config_t *cfg)
     const esp_timer_create_args_t net_ta = { .callback = net_tick, .name = "eul-net" };
     esp_timer_handle_t net_th;
     if (esp_timer_create(&net_ta, &net_th) == ESP_OK)
-        esp_timer_start_periodic(net_th, 30ULL * 1000000ULL);
+        esp_timer_start_periodic(net_th, 15ULL * 1000000ULL);
 }
 
 esp_err_t mode_mgr_start(void)
