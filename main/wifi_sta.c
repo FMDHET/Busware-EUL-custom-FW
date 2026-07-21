@@ -88,6 +88,14 @@ esp_err_t wifi_sta_start_and_wait(const char *ssid, const char *pass, TickType_t
     if (pass) strncpy((char *)wc.sta.password, pass, sizeof(wc.sta.password) - 1);
     wc.sta.threshold.authmode = (pass && pass[0]) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
+    // Unter einer Mesh-SSID (mehrere FRITZ!Box-/Repeater-Knoten) den STAERKSTEN
+    // AP nehmen. Default ist Fast-Scan = erster gefundener Treffer, nicht der
+    // beste; deshalb landete der Dongle auf einem -92 dBm-Knoten. Der ESP32
+    // roamt nach dem Connect nicht selbst (kein 802.11k/v/r), also zaehlt die
+    // Wahl beim Verbinden. Kein RSSI-Threshold, damit er sich zur Not auch an
+    // einem schwachen AP noch verbindet.
+    wc.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wc.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
