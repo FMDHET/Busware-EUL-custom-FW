@@ -369,7 +369,9 @@ a { color:var(--brand); }
     <fieldset><legend>Zeit (NTP)</legend>
       <label>NTP-Server</label>
       <input type="text" id="ntp_server" maxlength="63" autocomplete="off" placeholder="pool.ntp.org">
-      <div class="hint">Zeitzone fest Europe/Berlin (inkl. Sommerzeit).</div>
+      <label>Zeitzone</label>
+      <select id="tz"></select>
+      <div class="hint">Sommer-/Winterzeit wird gemaess Zone automatisch umgestellt.</div>
     </fieldset>
   </section>
 
@@ -510,7 +512,8 @@ a { color:var(--brand); }
 </main>
 
 <footer class="actions">
-  <button type="button" class="save" id="btn-save">Speichern &amp; Neustart</button>
+  <button type="button" class="save" id="btn-save">Speichern</button>
+  <button type="button" class="ghost" id="btn-reboot">Neustart</button>
   <button type="button" class="danger" id="btn-factory">Werkseinstellungen</button>
 </footer>
 

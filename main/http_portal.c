@@ -118,6 +118,7 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddStringToObject(root, "device_name", cfg.device_name);
     cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
     cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
+    cJSON_AddStringToObject(root, "tz",          cfg.tz);
     // WLAN-/MQTT-Passwort nur im STA-Modus ausliefern (dort schuetzt Basic-Auth
     // das Portal), damit der Nutzer sein gespeichertes Passwort ansehen kann.
     // Im offenen AP-Modus (Erst-Setup) niemals Secrets herausgeben.
@@ -262,10 +263,12 @@ static esp_err_t h_config(httpd_req_t *req)
     const cJSON *dev_name = cJSON_GetObjectItem(j, "device_name");
     const cJSON *adm_user = cJSON_GetObjectItem(j, "admin_user");
     const cJSON *ntp_srv  = cJSON_GetObjectItem(j, "ntp_server");
+    const cJSON *tz       = cJSON_GetObjectItem(j, "tz");
     esp_err_t rg = config_save_general(
         (dev_name && cJSON_IsString(dev_name)) ? dev_name->valuestring : cur.device_name,
         (adm_user && cJSON_IsString(adm_user) && adm_user->valuestring[0]) ? adm_user->valuestring : cur.admin_user,
-        (ntp_srv  && cJSON_IsString(ntp_srv)  && ntp_srv->valuestring[0])  ? ntp_srv->valuestring  : cur.ntp_server);
+        (ntp_srv  && cJSON_IsString(ntp_srv)  && ntp_srv->valuestring[0])  ? ntp_srv->valuestring  : cur.ntp_server,
+        (tz       && cJSON_IsString(tz)       && tz->valuestring[0])       ? tz->valuestring       : cur.tz);
 
     // Neues Portal-Passwort nur wenn geliefert (>=8 Zeichen), sonst unveraendert.
     const cJSON *adm_pass = cJSON_GetObjectItem(j, "admin_pass");
@@ -302,8 +305,8 @@ static esp_err_t h_config(httpd_req_t *req)
 
     if (rm != ESP_OK || ri != ESP_OK || rg != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     sec_event("config_change", "applied via portal");
+    // Speichern OHNE Neustart - Reboot ist ein eigener Button (/api/reboot).
     httpd_resp_sendstr(req, "{\"ok\":true}");
-    schedule_reboot();
     return ESP_OK;
 }
 

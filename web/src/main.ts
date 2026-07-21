@@ -32,6 +32,7 @@ interface State {
     device_name: string;
     admin_user: string;
     ntp_server: string;
+    tz: string;
 }
 
 interface Network {
@@ -102,6 +103,7 @@ interface SaveBody {
     device_name: string;
     admin_user: string;
     ntp_server: string;
+    tz: string;
     mqtt_pass?: string;
     admin_pass?: string;
     wifi_ssid?: string;
@@ -267,7 +269,49 @@ const api = {
         }),
     regenToken: (): Promise<{ token: string }> => apiJson('/api/regen-token', { method: 'POST' }),
     factoryReset: (): Promise<{ ok: boolean }> => apiJson('/api/factory-reset', { method: 'POST' }),
+    reboot: (): Promise<{ ok: boolean }> => apiJson('/api/reboot', { method: 'POST' }),
 };
+
+// Gaengige Zeitzonen: Anzeigename -> POSIX-TZ-String (mit DST-Regel).
+const TZ_ZONES: Array<[string, string]> = [
+    ['Europe/Berlin (Amsterdam, Paris, Rom, Madrid)', 'CET-1CEST,M3.5.0,M10.5.0/3'],
+    ['Europe/London (Dublin, Lissabon)', 'GMT0BST,M3.5.0/1,M10.5.0'],
+    ['Europe/Athen (Helsinki, Bukarest)', 'EET-2EEST,M3.5.0/3,M10.5.0/4'],
+    ['Europe/Moskau', 'MSK-3'],
+    ['UTC', 'UTC0'],
+    ['America/New York', 'EST5EDT,M3.2.0,M11.1.0'],
+    ['America/Chicago', 'CST6CDT,M3.2.0,M11.1.0'],
+    ['America/Denver', 'MST7MDT,M3.2.0,M11.1.0'],
+    ['America/Los Angeles', 'PST8PDT,M3.2.0,M11.1.0'],
+    ['America/Sao Paulo', '<-03>3'],
+    ['Asia/Dubai', '<+04>-4'],
+    ['Asia/Kolkata (Indien)', 'IST-5:30'],
+    ['Asia/Shanghai (China)', 'CST-8'],
+    ['Asia/Tokio', 'JST-9'],
+    ['Australia/Sydney', 'AEST-10AEDT,M10.1.0,M4.1.0/3'],
+];
+
+function populateTz(): void {
+    const sel = byId<HTMLSelectElement>('tz');
+    sel.innerHTML = '';
+    for (const [label, tz] of TZ_ZONES) {
+        const o = document.createElement('option');
+        o.value = tz;
+        o.textContent = label;
+        sel.appendChild(o);
+    }
+}
+
+function setTz(tz: string): void {
+    const sel = byId<HTMLSelectElement>('tz');
+    if (tz && !Array.from(sel.options).some((o) => o.value === tz)) {
+        const o = document.createElement('option');
+        o.value = tz;
+        o.textContent = `Eigene (${tz})`;
+        sel.appendChild(o);
+    }
+    sel.value = tz || 'CET-1CEST,M3.5.0,M10.5.0/3';
+}
 
 // -----------------------------------------------------------------------------
 // Formatierung
@@ -333,6 +377,7 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('dev_name').value = s.device_name || '';
         byId<HTMLInputElement>('admin_user').value = s.admin_user || 'admin';
         byId<HTMLInputElement>('ntp_server').value = s.ntp_server || 'pool.ntp.org';
+        setTz(s.tz);
         byId<HTMLInputElement>('mqtt_disc').checked = s.mqtt_discovery;
         byId<HTMLInputElement>('mqtt_ret').checked = s.mqtt_retain;
         byId<HTMLInputElement>('mqtt_prefix').value = s.mqtt_disc_prefix || 'homeassistant';
@@ -443,6 +488,7 @@ async function doSave(): Promise<void> {
         device_name: byId<HTMLInputElement>('dev_name').value.trim(),
         admin_user: byId<HTMLInputElement>('admin_user').value.trim(),
         ntp_server: byId<HTMLInputElement>('ntp_server').value.trim(),
+        tz: byId<HTMLSelectElement>('tz').value,
     };
     const mqttPass = byId<HTMLInputElement>('mqtt_pass').value;
     if (mqttPass) body.mqtt_pass = mqttPass;
@@ -461,7 +507,17 @@ async function doSave(): Promise<void> {
     }
     try {
         await api.save(body);
-        say('gespeichert · Geraet startet neu...');
+        say('gespeichert — Neustart noetig fuer WLAN/TCP/MQTT/Name/Zeitzone');
+    } catch (e) {
+        say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
+async function doReboot(): Promise<void> {
+    if (!confirm('Geraet jetzt neu starten? Die Verbindung wird kurz getrennt.')) return;
+    try {
+        await api.reboot();
+        say('Neustart ausgeloest ...');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -853,6 +909,7 @@ function init(): void {
     byId('btn-regen').addEventListener('click', doRegenToken);
     byId('btn-regen2').addEventListener('click', doRegenToken);
     byId('btn-save').addEventListener('click', doSave);
+    byId('btn-reboot').addEventListener('click', doReboot);
     byId('btn-factory').addEventListener('click', doFactoryReset);
     byId('btn-clear').addEventListener('click', clearConsole);
     byId('btn-pause').addEventListener('click', togglePause);
@@ -860,6 +917,7 @@ function init(): void {
     byId('btn-preset-ha').addEventListener('click', applyHAPreset);
 
     wireConsoleKeyboard();
+    populateTz();
 
     void loadState();
     void doScan();

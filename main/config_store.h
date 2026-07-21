@@ -23,6 +23,7 @@
 #define EUL_DEV_NAME_MAX       40
 #define EUL_ADMIN_USER_MAX     24
 #define EUL_NTP_MAX            64
+#define EUL_TZ_MAX             48
 
 typedef struct {
     bool     provisioned;                    // WiFi-Setup abgeschlossen?
@@ -32,9 +33,10 @@ typedef struct {
     uint16_t tcp_port;
 
     // Allgemein
-    char     device_name[EUL_DEV_NAME_MAX];  // Anzeigename (Portal, MQTT/HA)
+    char     device_name[EUL_DEV_NAME_MAX];  // Anzeigename (Portal, MQTT/HA, mDNS)
     char     admin_user[EUL_ADMIN_USER_MAX]; // Portal-Login-Benutzer (Default admin)
     char     ntp_server[EUL_NTP_MAX];        // SNTP-Server (Default pool.ntp.org)
+    char     tz[EUL_TZ_MAX];                 // POSIX-TZ-String (Default Europe/Berlin)
 
     // REST-API (lesen/senden per HTTP, Auth ueber tcp_token)
     bool     api_enabled;
@@ -82,10 +84,11 @@ esp_err_t config_save_modes(bool usb_enabled,
                              bool tcp_auth_required,
                              uint16_t tcp_port);
 
-// Schreibt Allgemein-Einstellungen (Name, Login-User, NTP-Server).
+// Schreibt Allgemein-Einstellungen (Name, Login-User, NTP-Server, Zeitzone).
 esp_err_t config_save_general(const char *device_name,
                                const char *admin_user,
-                               const char *ntp_server);
+                               const char *ntp_server,
+                               const char *tz);
 
 // Schreibt REST-API- und MQTT-Einstellungen (nur diese Keys).
 esp_err_t config_save_integrations(bool api_enabled,

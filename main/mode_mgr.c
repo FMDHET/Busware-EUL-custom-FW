@@ -63,18 +63,42 @@ void mode_mgr_schedule_reboot(int delay_ms)
     xTaskCreate(reboot_task, "eul-reboot", 2048, (void *)(intptr_t)delay_ms, 3, NULL);
 }
 
+// Baut aus dem (freien) Geraetenamen einen gueltigen mDNS-Hostnamen:
+// kleingeschrieben, nur [a-z0-9-], Rest zu '-' zusammengefasst, ohne Rand-'-'.
+static void sanitize_hostname(const char *in, char *out, size_t cap)
+{
+    size_t j = 0;
+    bool prev_dash = false;
+    for (size_t i = 0; in && in[i] && j + 1 < cap; i++) {
+        char c = in[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            out[j++] = c; prev_dash = false;
+        } else if (j > 0 && !prev_dash) {
+            out[j++] = '-'; prev_dash = true;
+        }
+    }
+    while (j > 0 && out[j - 1] == '-') j--;
+    out[j] = '\0';
+}
+
 // -----------------------------------------------------------------------------
-// mDNS im Normal-Modus
+// mDNS im Normal-Modus. Hostname wird aus dem Geraetenamen abgeleitet
+// (Fallback: eul-gateway-<suffix>).
 // -----------------------------------------------------------------------------
-static void mdns_up(uint16_t tcp_port, bool tcp_enabled)
+static void mdns_up(uint16_t tcp_port, bool tcp_enabled, const char *device_name)
 {
     char host[48];
-    snprintf(host, sizeof(host), "%s-%s",
-             CONFIG_EUL_MDNS_HOSTNAME_PREFIX, config_device_suffix());
+    sanitize_hostname(device_name ? device_name : "", host, sizeof(host));
+    if (!host[0]) {
+        snprintf(host, sizeof(host), "%s-%s",
+                 CONFIG_EUL_MDNS_HOSTNAME_PREFIX, config_device_suffix());
+    }
 
     if (mdns_init() != ESP_OK) return;
     mdns_hostname_set(host);
-    mdns_instance_name_set("Busware EUL22 EnOcean Gateway");
+    mdns_instance_name_set((device_name && device_name[0]) ? device_name
+                                                           : "Busware EUL22 EnOcean Gateway");
     if (tcp_enabled) {
         mdns_service_add(NULL, "_enocean", "_tcp", tcp_port, NULL, 0);
         mdns_txt_item_t txt[] = {
@@ -127,18 +151,18 @@ static void run_provisioning(const eul_config_t *cfg)
 // Zeit per SNTP holen (nur Normalmodus, WiFi steht). Zeitzone Europe/Berlin
 // inkl. Sommerzeit, damit die Telegramme im Portal die echte Uhrzeit zeigen.
 // -----------------------------------------------------------------------------
-static void time_sync_start(const char *server)
+static void time_sync_start(const char *server, const char *tz)
 {
     // SNTP haelt den Server-Zeiger, daher in einen statischen Puffer kopieren.
     static char s_ntp[EUL_NTP_MAX];
     snprintf(s_ntp, sizeof(s_ntp), "%s", (server && server[0]) ? server : "pool.ntp.org");
 
-    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+    setenv("TZ", (tz && tz[0]) ? tz : "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
     esp_sntp_setservername(0, s_ntp);
     esp_sntp_init();
-    ESP_LOGI(TAG, "sntp gestartet (%s), TZ=Europe/Berlin", s_ntp);
+    ESP_LOGI(TAG, "sntp gestartet (%s), TZ=%s", s_ntp, (tz && tz[0]) ? tz : "default");
 }
 
 // -----------------------------------------------------------------------------
@@ -196,8 +220,8 @@ static void run_normal(const eul_config_t *cfg)
         return;
     }
 
-    mdns_up(cfg->tcp_port, cfg->tcp_enabled);
-    time_sync_start(cfg->ntp_server);
+    mdns_up(cfg->tcp_port, cfg->tcp_enabled, cfg->device_name);
+    time_sync_start(cfg->ntp_server, cfg->tz);
 
     if (cfg->tcp_enabled) {
         ESP_ERROR_CHECK(tcp_server_start(cfg->tcp_port,

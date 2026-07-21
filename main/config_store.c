@@ -126,6 +126,8 @@ esp_err_t config_load(eul_config_t *out)
     if (!out->admin_user[0]) strcpy(out->admin_user, "admin");
     ESP_ERROR_CHECK(read_str(h, "ntp_srv",    out->ntp_server,  sizeof(out->ntp_server)));
     if (!out->ntp_server[0]) strcpy(out->ntp_server, "pool.ntp.org");
+    ESP_ERROR_CHECK(read_str(h, "tz",         out->tz,          sizeof(out->tz)));
+    if (!out->tz[0]) strcpy(out->tz, "CET-1CEST,M3.5.0,M10.5.0/3");
 
     ESP_ERROR_CHECK(read_u8(h,  "api_en",    &u8, 0)); out->api_enabled  = u8 != 0;
     ESP_ERROR_CHECK(read_u8(h,  "mqtt_en",   &u8, 0)); out->mqtt_enabled = u8 != 0;
@@ -198,7 +200,8 @@ esp_err_t config_save_modes(bool usb_enabled,
 
 esp_err_t config_save_general(const char *device_name,
                               const char *admin_user,
-                              const char *ntp_server)
+                              const char *ntp_server,
+                              const char *tz)
 {
     nvs_handle_t h;
     esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
@@ -207,6 +210,7 @@ esp_err_t config_save_general(const char *device_name,
     r  = nvs_set_str(h, "dev_name",   device_name ? device_name : "");
     if (r == ESP_OK) r = nvs_set_str(h, "admin_user", (admin_user && admin_user[0]) ? admin_user : "admin");
     if (r == ESP_OK) r = nvs_set_str(h, "ntp_srv",    (ntp_server && ntp_server[0]) ? ntp_server : "pool.ntp.org");
+    if (r == ESP_OK) r = nvs_set_str(h, "tz",         (tz && tz[0]) ? tz : "CET-1CEST,M3.5.0,M10.5.0/3");
     if (r == ESP_OK) r = nvs_commit(h);
     nvs_close(h);
 
