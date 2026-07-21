@@ -20,8 +20,11 @@
 #include "esp_wifi.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_sntp.h"
 #include "nvs_flash.h"
 #include "mdns.h"
+
+#include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -114,6 +117,20 @@ static void run_provisioning(const eul_config_t *cfg)
 }
 
 // -----------------------------------------------------------------------------
+// Zeit per SNTP holen (nur Normalmodus, WiFi steht). Zeitzone Europe/Berlin
+// inkl. Sommerzeit, damit die Telegramme im Portal die echte Uhrzeit zeigen.
+// -----------------------------------------------------------------------------
+static void time_sync_start(void)
+{
+    setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+    tzset();
+    esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+    ESP_LOGI(TAG, "sntp gestartet (pool.ntp.org), TZ=Europe/Berlin");
+}
+
+// -----------------------------------------------------------------------------
 // Normalmodus: WiFi-STA, optional TCP-Server, optional USB-CDC
 // -----------------------------------------------------------------------------
 static void run_normal(const eul_config_t *cfg)
@@ -130,6 +147,7 @@ static void run_normal(const eul_config_t *cfg)
     }
 
     mdns_up(cfg->tcp_port, cfg->tcp_enabled);
+    time_sync_start();
 
     if (cfg->tcp_enabled) {
         ESP_ERROR_CHECK(tcp_server_start(cfg->tcp_port,

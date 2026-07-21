@@ -43,6 +43,7 @@ interface Stats {
     ip: string;
     rssi: number;
     uptime_ms: number;
+    epoch_ms: number;
 }
 
 interface ConsoleLine {
@@ -413,7 +414,13 @@ async function pollStats(): Promise<void> {
     if (activeTabName() !== 'status') return;
     try {
         const s = await api.stats();
+        // Zeit-Basis fuer Telegramm-Zeitstempel (0 solange SNTP nicht sync).
+        if (s.epoch_ms > 1_700_000_000_000) bootEpochMs = s.epoch_ms - s.uptime_ms;
+        const clock = s.epoch_ms > 1_700_000_000_000
+            ? new Date(s.epoch_ms).toLocaleString('de-DE')
+            : 'nicht synchronisiert';
         byId('gwstat').textContent =
+            `Uhrzeit (NTP) : ${clock}\n` +
             `IP-Adresse    : ${s.ip || '—'}\n` +
             `WLAN-Signal   : ${s.rssi ? `${s.rssi} dBm (${rssiQuality(s.rssi)})` : 'n/a'}\n` +
             `Uptime        : ${fmtUptime(s.uptime_ms)}\n` +
@@ -434,10 +441,60 @@ const TELE_MAX = 60;
 const DIR_RX = '↓'; // empfangen vom TCM515
 const DIR_TX = '↑'; // an den TCM515 gesendet
 
+// epoch_ms - uptime_ms aus /api/stats. Sobald bekannt, werden Telegramm-
+// Zeitstempel als echte Uhrzeit gerechnet (uptime der Zeile + diese Basis).
+let bootEpochMs: number | null = null;
+
 const RORG_NAMES: Record<number, string> = {
     0xf6: 'RPS', 0xd5: '1BS', 0xa5: '4BS', 0xd2: 'VLD',
     0xd1: 'MSC', 0xa6: 'ADT', 0xd4: 'UTE',
 };
+
+// Wippen-/Tastenbezeichnung fuer RPS (F6-02-xx).
+const RPS_BUTTONS = ['Wippe A unten', 'Wippe A oben', 'Wippe B unten', 'Wippe B oben', 'Taste 5', 'Taste 6', 'Taste 7', 'Taste 8'];
+
+// RPS (RORG F6): Schalter/Wippe. status-Bit NU (0x20) unterscheidet N-/U-Msg,
+// DB0-Bit EB (0x10) = Energiebogen gedrueckt/losgelassen.
+function describeRps(db0: number, status: number): string {
+    const eb = (db0 & 0x10) !== 0;
+    if ((status & 0x20) === 0) return eb ? 'Taste(n) gedrückt' : 'losgelassen';
+    if (!eb && db0 === 0x00) return 'losgelassen';
+    let s = `${RPS_BUTTONS[(db0 >> 5) & 0x07]} ${eb ? 'gedrückt' : 'losgelassen'}`;
+    if (db0 & 0x01) s += ` + ${RPS_BUTTONS[(db0 >> 1) & 0x07]}`; // zweite Aktion
+    return s;
+}
+
+// 1BS (RORG D5): einfacher Kontakt (z.B. Fenster/Tuer).
+function describe1bs(db0: number): string {
+    return db0 & 0x01 ? 'Kontakt geschlossen' : 'Kontakt offen';
+}
+
+// 4BS (RORG A5) als A5-38-08 Zentralkommando (was dieses Gateway schaltet).
+// d = [DB3, DB2, DB1, DB0]; DB0-Bit 0x08 = Datentelegramm (sonst Lernen).
+function describe4bs(d: number[]): string {
+    if (d.length !== 4) return '';
+    const db3 = d[0], db2 = d[1], db0 = d[3];
+    if ((db0 & 0x08) === 0) return 'Lerntelegramm';
+    if (db3 === 0x01) return db0 & 0x01 ? 'Einschalten' : 'Ausschalten';
+    if (db3 === 0x02) return `Dimmen auf ${db2}%${db0 & 0x01 ? '' : ' (aus)'}`;
+    return '';
+}
+
+function describeTelegram(rorg: number, payload: number[], status: number): string {
+    if (rorg === 0xf6) return describeRps(payload[0] ?? 0, status);
+    if (rorg === 0xd5) return describe1bs(payload[0] ?? 0);
+    if (rorg === 0xa5) return describe4bs(payload);
+    return '';
+}
+
+// Zeitstempel einer Telegramm-Zeile: echte Uhrzeit wenn SNTP-Basis bekannt,
+// sonst Uptime-Sekunden als Fallback.
+function fmtTelegramTime(ms: number): string {
+    if (bootEpochMs === null) return (ms / 1000).toFixed(3);
+    const d = new Date(bootEpochMs + ms);
+    const p2 = (x: number) => String(x).padStart(2, '0');
+    return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+}
 
 interface Telegram {
     ms: number;
@@ -445,6 +502,7 @@ interface Telegram {
     rorg: string;
     sender: string;
     data: string;
+    text: string;
     dbm: number | null;
 }
 
@@ -480,26 +538,28 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
 
     if (type !== 1) {
         // kein RADIO_ERP1 (z.B. RESPONSE 0x02) - Typ + Rohdaten zeigen
-        return { ms, dir, rorg: `Typ 0x${type.toString(16).padStart(2, '0')}`, sender: '—', data: toHex(data), dbm: null };
+        return { ms, dir, rorg: `Typ 0x${type.toString(16).padStart(2, '0')}`, sender: '—', data: toHex(data), text: '', dbm: null };
     }
     if (dataLen < 6) return null;
     const rorg = data[0];
     const sender = data.slice(dataLen - 5, dataLen - 1);
+    const status = data[dataLen - 1];
     const payload = data.slice(1, dataLen - 5);
     const dbm = optLen >= 6 && opt.length >= 6 ? -opt[5] : null;
     const name = RORG_NAMES[rorg] || `0x${rorg.toString(16).padStart(2, '0')}`;
-    return { ms, dir, rorg: name, sender: fmtEnoceanId(sender), data: toHex(payload), dbm };
+    return { ms, dir, rorg: name, sender: fmtEnoceanId(sender), data: toHex(payload), text: describeTelegram(rorg, payload, status), dbm };
 }
 
 function renderTelegramRow(t: Telegram): string {
     const dbm = t.dbm === null ? '' : String(t.dbm);
     return (
         '<tr>' +
-        `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${(t.ms / 1000).toFixed(3)}</td>` +
+        `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${fmtTelegramTime(t.ms)}</td>` +
         `<td data-label="Ri." style="text-align:center">${t.dir}</td>` +
         `<td data-label="RORG">${escapeHtml(t.rorg)}</td>` +
         `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</td>` +
         `<td data-label="Daten" style="font-family:ui-monospace,monospace">${escapeHtml(t.data)}</td>` +
+        `<td data-label="Bedeutung">${escapeHtml(t.text)}</td>` +
         `<td data-label="dBm" style="text-align:right">${dbm}</td>` +
         '</tr>'
     );

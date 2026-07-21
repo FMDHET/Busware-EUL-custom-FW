@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
 
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -298,12 +299,20 @@ static esp_err_t h_stats(httpd_req_t *req)
     if (esp_wifi_sta_get_rssi(&rssi) != ESP_OK) rssi = 0;
     const char *ip = wifi_sta_ip_str();
 
-    char buf[320];
+    // Echte Uhrzeit (epoch ms) fuer die Telegramm-Zeitstempel. 0 solange SNTP
+    // noch nicht synchronisiert hat (Jahr < 2020) -> Frontend faellt dann auf
+    // Uptime-Sekunden zurueck.
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long long epoch_ms = (tv.tv_sec > 1700000000LL)
+        ? ((long long)tv.tv_sec * 1000 + tv.tv_usec / 1000) : 0;
+
+    char buf[384];
     int n = snprintf(buf, sizeof(buf),
         "{\"clients\":%d,"
         "\"tcm_rx_bytes\":%llu,\"tcm_tx_bytes\":%llu,"
         "\"tcm_rx_frames\":%u,\"tcm_tx_frames\":%u,"
-        "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu}",
+        "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu,\"epoch_ms\":%lld}",
         tcp_server_active_clients(),
         (unsigned long long)enocean_uart_rx_bytes(),
         (unsigned long long)enocean_uart_tx_bytes(),
@@ -311,7 +320,8 @@ static esp_err_t h_stats(httpd_req_t *req)
         (unsigned)enocean_uart_tx_frames(),
         ip ? ip : "",
         rssi,
-        (unsigned long long)(esp_timer_get_time() / 1000));
+        (unsigned long long)(esp_timer_get_time() / 1000),
+        epoch_ms);
     if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, n);
