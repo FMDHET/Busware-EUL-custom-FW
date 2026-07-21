@@ -121,6 +121,14 @@ esp_err_t config_load(eul_config_t *out)
     ESP_ERROR_CHECK(read_str(h, "admin_pass", out->admin_pass, sizeof(out->admin_pass)));
     ESP_ERROR_CHECK(read_str(h, "tcp_token",  out->tcp_token,  sizeof(out->tcp_token)));
 
+    ESP_ERROR_CHECK(read_u8(h,  "api_en",    &u8, 0)); out->api_enabled  = u8 != 0;
+    ESP_ERROR_CHECK(read_u8(h,  "mqtt_en",   &u8, 0)); out->mqtt_enabled = u8 != 0;
+    ESP_ERROR_CHECK(read_u16(h, "mqtt_port", &out->mqtt_port, 1883));
+    ESP_ERROR_CHECK(read_str(h, "mqtt_host",  out->mqtt_host,  sizeof(out->mqtt_host)));
+    ESP_ERROR_CHECK(read_str(h, "mqtt_user",  out->mqtt_user,  sizeof(out->mqtt_user)));
+    ESP_ERROR_CHECK(read_str(h, "mqtt_pass",  out->mqtt_pass,  sizeof(out->mqtt_pass)));
+    ESP_ERROR_CHECK(read_str(h, "mqtt_topic", out->mqtt_topic, sizeof(out->mqtt_topic)));
+
     ESP_ERROR_CHECK(ensure_random_defaults(h, out));
     sanity_check_and_fix(h, out);
 
@@ -174,6 +182,37 @@ esp_err_t config_save_modes(bool usb_enabled,
     if (r == ESP_OK) {
         sec_event("modes_set", "usb=%d tcp=%d auth=%d port=%u",
                   usb_enabled, tcp_enabled, tcp_auth_required, tcp_port);
+    }
+    return r;
+}
+
+esp_err_t config_save_integrations(bool api_enabled,
+                                   bool mqtt_enabled,
+                                   const char *mqtt_host,
+                                   uint16_t mqtt_port,
+                                   const char *mqtt_user,
+                                   const char *mqtt_pass,
+                                   const char *mqtt_topic)
+{
+    nvs_handle_t h;
+    esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
+    if (r != ESP_OK) return r;
+
+    if (mqtt_port == 0) mqtt_port = 1883;
+
+    r  = nvs_set_u8( h, "api_en",     api_enabled  ? 1 : 0);
+    if (r == ESP_OK) r = nvs_set_u8( h, "mqtt_en",   mqtt_enabled ? 1 : 0);
+    if (r == ESP_OK) r = nvs_set_u16(h, "mqtt_port", mqtt_port);
+    if (r == ESP_OK) r = nvs_set_str(h, "mqtt_host",  mqtt_host  ? mqtt_host  : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "mqtt_user",  mqtt_user  ? mqtt_user  : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "mqtt_pass",  mqtt_pass  ? mqtt_pass  : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "mqtt_topic", mqtt_topic ? mqtt_topic : "");
+    if (r == ESP_OK) r = nvs_commit(h);
+    nvs_close(h);
+
+    if (r == ESP_OK) {
+        sec_event("integrations_set", "api=%d mqtt=%d host=%s port=%u",
+                  api_enabled, mqtt_enabled, mqtt_host ? mqtt_host : "", mqtt_port);
     }
     return r;
 }

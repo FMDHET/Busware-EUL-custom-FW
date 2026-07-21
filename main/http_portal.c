@@ -6,6 +6,7 @@
 #include "tcp_server.h"
 #include "enocean_uart.h"
 #include "console_log.h"
+#include "telemetry.h"
 #include "sdkconfig.h"
 
 #include <string.h>
@@ -103,6 +104,13 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "tcp_port",        cfg.tcp_port);
     cJSON_AddBoolToObject(root, "tcp_auth_required", cfg.tcp_auth_required);
     cJSON_AddStringToObject(root, "tcp_token",       cfg.tcp_token);
+    cJSON_AddBoolToObject(root, "api_enabled",   cfg.api_enabled);
+    cJSON_AddBoolToObject(root, "mqtt_enabled",  cfg.mqtt_enabled);
+    cJSON_AddStringToObject(root, "mqtt_host",   cfg.mqtt_host);
+    cJSON_AddNumberToObject(root, "mqtt_port",   cfg.mqtt_port);
+    cJSON_AddStringToObject(root, "mqtt_user",   cfg.mqtt_user);
+    cJSON_AddStringToObject(root, "mqtt_topic",  cfg.mqtt_topic);
+    // mqtt_pass wird nie ausgeliefert - nur setzbar (leer = unveraendert).
     // Admin-Pass nur im AP-Modus einmalig anzeigen. Im STA nur Platzhalter.
     cJSON_AddStringToObject(root, "admin_pass",
                             s_ap_mode ? cfg.admin_pass : "");
@@ -237,9 +245,29 @@ static esp_err_t h_config(httpd_req_t *req)
         (tcp  && cJSON_IsBool(tcp))    ? cJSON_IsTrue(tcp) : cur.tcp_enabled,
         (ta   && cJSON_IsBool(ta))     ? cJSON_IsTrue(ta)  : cur.tcp_auth_required,
         (port && cJSON_IsNumber(port)) ? (uint16_t)port->valueint : cur.tcp_port);
+
+    // REST-API + MQTT. mqtt_pass leer => bisheriges Passwort behalten.
+    const cJSON *api_en   = cJSON_GetObjectItem(j, "api_enabled");
+    const cJSON *mq_en    = cJSON_GetObjectItem(j, "mqtt_enabled");
+    const cJSON *mq_host  = cJSON_GetObjectItem(j, "mqtt_host");
+    const cJSON *mq_port  = cJSON_GetObjectItem(j, "mqtt_port");
+    const cJSON *mq_user  = cJSON_GetObjectItem(j, "mqtt_user");
+    const cJSON *mq_pass  = cJSON_GetObjectItem(j, "mqtt_pass");
+    const cJSON *mq_topic = cJSON_GetObjectItem(j, "mqtt_topic");
+    bool mp_set = mq_pass && cJSON_IsString(mq_pass) && mq_pass->valuestring && mq_pass->valuestring[0];
+
+    esp_err_t ri = config_save_integrations(
+        (api_en   && cJSON_IsBool(api_en))     ? cJSON_IsTrue(api_en) : cur.api_enabled,
+        (mq_en    && cJSON_IsBool(mq_en))      ? cJSON_IsTrue(mq_en)  : cur.mqtt_enabled,
+        (mq_host  && cJSON_IsString(mq_host))  ? mq_host->valuestring : cur.mqtt_host,
+        (mq_port  && cJSON_IsNumber(mq_port))  ? (uint16_t)mq_port->valueint : cur.mqtt_port,
+        (mq_user  && cJSON_IsString(mq_user))  ? mq_user->valuestring : cur.mqtt_user,
+        mp_set                                 ? mq_pass->valuestring : cur.mqtt_pass,
+        (mq_topic && cJSON_IsString(mq_topic)) ? mq_topic->valuestring : cur.mqtt_topic);
+
     cJSON_Delete(j);
 
-    if (rm != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (rm != ESP_OK || ri != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     sec_event("config_change", "applied via portal");
     httpd_resp_sendstr(req, "{\"ok\":true}");
     schedule_reboot();
@@ -348,6 +376,103 @@ static esp_err_t h_console(httpd_req_t *req)
     return httpd_resp_send(req, out, n);
 }
 
+// -----------------------------------------------------------------------------
+// REST-API (eigener Reiter): Token-Auth ueber den Geraete-Token (tcp_token),
+// per "Authorization: Bearer <token>" ODER "?token=<token>". Nur aktiv wenn
+// api_enabled gesetzt ist. Bewusst KEINE Basic-Auth - fuer externe Consumer.
+// -----------------------------------------------------------------------------
+static size_t parse_hex_str(const char *s, uint8_t *out, size_t outcap)
+{
+    size_t n = 0;
+    int hi = -1;
+    for (const char *p = s; *p && n < outcap; p++) {
+        int v;
+        char c = *p;
+        if      (c >= '0' && c <= '9') v = c - '0';
+        else if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+        else continue;
+        if (hi < 0) hi = v;
+        else { out[n++] = (uint8_t)((hi << 4) | v); hi = -1; }
+    }
+    return n;
+}
+
+static bool api_authorized(httpd_req_t *req, const eul_config_t *cfg)
+{
+    if (!cfg->api_enabled) return false;
+    char provided[EUL_TCP_TOKEN_MAX] = {0};
+
+    char auth[128];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth, sizeof(auth)) == ESP_OK &&
+        strncmp(auth, "Bearer ", 7) == 0) {
+        const char *tok = auth + 7;
+        size_t k = 0;
+        while (tok[k] && k < sizeof(provided) - 1) { provided[k] = tok[k]; k++; }
+        provided[k] = '\0';
+    }
+    if (!provided[0]) {
+        char q[192];
+        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+            httpd_query_key_value(q, "token", provided, sizeof(provided));
+        }
+    }
+    if (!provided[0]) return false;
+    return sec_constant_time_equal(provided, cfg->tcp_token);
+}
+
+static esp_err_t api_reject(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"error\":\"api disabled or invalid token\"}");
+}
+
+// GET /api/telegrams -> letzte empfangene Telegramme als JSON-Array
+static esp_err_t h_telegrams(httpd_req_t *req)
+{
+    eul_config_t cfg;
+    if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (!api_authorized(req, &cfg)) return api_reject(req);
+
+    static char out[8192];
+    int n = telemetry_dump_json(out, sizeof(out));
+    if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, n);
+}
+
+// POST /api/send  Body {"hex":"55...."} -> ESP3-Frame an den TCM515
+static esp_err_t h_send(httpd_req_t *req)
+{
+    eul_config_t cfg;
+    if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (!api_authorized(req, &cfg)) return api_reject(req);
+
+    char *body = read_body(req);
+    if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
+    cJSON *j = cJSON_Parse(body);
+    free(body);
+    if (!j) { httpd_resp_set_status(req, "400 Bad Request"); return httpd_resp_sendstr(req, "{\"error\":\"bad json\"}"); }
+
+    const cJSON *hex = cJSON_GetObjectItem(j, "hex");
+    uint8_t frame[64];
+    size_t nf = 0;
+    if (hex && cJSON_IsString(hex) && hex->valuestring) {
+        nf = parse_hex_str(hex->valuestring, frame, sizeof(frame));
+    }
+    cJSON_Delete(j);
+
+    if (nf < 6) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"error\":\"hex missing or too short\"}");
+    }
+    esp_err_t w = enocean_uart_write_frame(frame, nf);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, w == ESP_OK ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
 esp_err_t http_portal_start(bool ap_mode)
 {
     s_ap_mode = ap_mode;
@@ -382,6 +507,8 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_cl   = { .uri="/api/clients", .method=HTTP_GET, .handler=h_clients };
     httpd_uri_t u_ss   = { .uri="/api/stats",   .method=HTTP_GET, .handler=h_stats };
     httpd_uri_t u_co   = { .uri="/api/console", .method=HTTP_GET, .handler=h_console };
+    httpd_uri_t u_tel  = { .uri="/api/telegrams", .method=HTTP_GET,  .handler=h_telegrams };
+    httpd_uri_t u_snd  = { .uri="/api/send",      .method=HTTP_POST, .handler=h_send };
     // Captive-Portal-Erkennung bekannter Betriebssysteme: alles auf / umleiten
     httpd_uri_t u_gen  = { .uri="/generate_204", .method=HTTP_GET, .handler=h_captive };
     httpd_uri_t u_hs   = { .uri="/hotspot-detect.html", .method=HTTP_GET, .handler=h_captive };
@@ -398,6 +525,8 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_cl);
     httpd_register_uri_handler(srv, &u_ss);
     httpd_register_uri_handler(srv, &u_co);
+    httpd_register_uri_handler(srv, &u_tel);
+    httpd_register_uri_handler(srv, &u_snd);
     if (ap_mode) {
         httpd_register_uri_handler(srv, &u_gen);
         httpd_register_uri_handler(srv, &u_hs);

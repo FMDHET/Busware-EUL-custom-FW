@@ -18,6 +18,12 @@ interface State {
     tcp_auth_required: boolean;
     tcp_token: string;
     admin_pass: string;
+    api_enabled: boolean;
+    mqtt_enabled: boolean;
+    mqtt_host: string;
+    mqtt_port: number;
+    mqtt_user: string;
+    mqtt_topic: string;
 }
 
 interface Network {
@@ -62,6 +68,13 @@ interface SaveBody {
     tcp_port: number;
     tcp_auth_required: boolean;
     usb_enabled: boolean;
+    api_enabled: boolean;
+    mqtt_enabled: boolean;
+    mqtt_host: string;
+    mqtt_port: number;
+    mqtt_user: string;
+    mqtt_topic: string;
+    mqtt_pass?: string;
     wifi_ssid?: string;
     wifi_pass?: string;
 }
@@ -101,7 +114,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'status' | 'wifi' | 'usb' | 'enocean' | 'konsole';
+type TabName = 'status' | 'wifi' | 'usb' | 'enocean' | 'api' | 'mqtt' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -266,6 +279,7 @@ function escapeHtml(s: string): string {
 // -----------------------------------------------------------------------------
 let tokenDisplay: SecretDisplay;
 let adminDisplay: SecretDisplay;
+let apiTokenDisplay: SecretDisplay;
 
 async function loadState(): Promise<void> {
     try {
@@ -277,6 +291,15 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('usb_en').checked = s.usb_enabled;
         tokenDisplay.set(s.tcp_token);
         adminDisplay.set(s.admin_pass);
+        byId<HTMLInputElement>('api_en').checked = s.api_enabled;
+        byId<HTMLInputElement>('mqtt_en').checked = s.mqtt_enabled;
+        byId<HTMLInputElement>('mqtt_host').value = s.mqtt_host || '';
+        byId<HTMLInputElement>('mqtt_port').value = String(s.mqtt_port || 1883);
+        byId<HTMLInputElement>('mqtt_user').value = s.mqtt_user || '';
+        byId<HTMLInputElement>('mqtt_topic').value = s.mqtt_topic || '';
+        apiTokenDisplay.set(s.tcp_token);
+        renderApiDoc(s.tcp_token, s.api_enabled);
+        renderMqttDoc(s.mqtt_topic, s.suffix);
         if (!s.tcp_auth_required && s.tcp_enabled) renderHAYaml();
         say(`Modus: ${s.mode} · MAC-Suffix ${s.suffix}`);
     } catch (e) {
@@ -309,6 +332,8 @@ async function doRegenToken(): Promise<void> {
     try {
         const r = await api.regenToken();
         tokenDisplay.set(r.token);
+        apiTokenDisplay.set(r.token);
+        renderApiDoc(r.token, byId<HTMLInputElement>('api_en').checked);
         say('neuer Token');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
@@ -338,13 +363,43 @@ function renderHAYaml(): void {
     byId('ha_yaml_box').style.display = 'block';
 }
 
+function renderApiDoc(token: string, enabled: boolean): void {
+    const host = currentHost();
+    byId('api_doc').textContent =
+        (enabled ? '' : '# API ist derzeit deaktiviert\n\n') +
+        `GET  http://${host}/api/telegrams\n` +
+        `     Header: Authorization: Bearer ${token}\n` +
+        `     -> letzte empfangene Telegramme (JSON-Array)\n\n` +
+        `POST http://${host}/api/send\n` +
+        `     Header: Authorization: Bearer ${token}\n` +
+        `     Body:   {"hex":"55...."}   (kompletter ESP3-Frame)\n\n` +
+        `Beispiel:\n` +
+        `curl -H "Authorization: Bearer ${token}" http://${host}/api/telegrams`;
+}
+
+function renderMqttDoc(topic: string, suffix: string): void {
+    const base = topic || `eul22/${suffix}`;
+    byId('mqtt_doc').textContent =
+        `Empfangene Telegramme werden publiziert auf:\n  ${base}/rx\n\n` +
+        `Sende-Kommandos abonniert das Geraet auf:\n  ${base}/send\n` +
+        `  Payload = ESP3-Frame als Hex, z.B. "55 00 07 07 01 ..."`;
+}
+
 async function doSave(): Promise<void> {
     const body: SaveBody = {
         tcp_enabled: byId<HTMLInputElement>('tcp_en').checked,
         tcp_port: parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100,
         tcp_auth_required: byId<HTMLInputElement>('tcp_auth').checked,
         usb_enabled: byId<HTMLInputElement>('usb_en').checked,
+        api_enabled: byId<HTMLInputElement>('api_en').checked,
+        mqtt_enabled: byId<HTMLInputElement>('mqtt_en').checked,
+        mqtt_host: byId<HTMLInputElement>('mqtt_host').value.trim(),
+        mqtt_port: parseInt(byId<HTMLInputElement>('mqtt_port').value, 10) || 1883,
+        mqtt_user: byId<HTMLInputElement>('mqtt_user').value.trim(),
+        mqtt_topic: byId<HTMLInputElement>('mqtt_topic').value.trim(),
     };
+    const mqttPass = byId<HTMLInputElement>('mqtt_pass').value;
+    if (mqttPass) body.mqtt_pass = mqttPass;
     const s = byId<HTMLInputElement>('ssid').value.trim();
     const p = byId<HTMLInputElement>('pass').value;
     if (s && p) {
@@ -697,9 +752,11 @@ function init(): void {
     wireEyeToggles();
     tokenDisplay = new SecretDisplay(byId('token'));
     adminDisplay = new SecretDisplay(byId('adminp'));
+    apiTokenDisplay = new SecretDisplay(byId('api_token'));
 
     byId('btn-scan').addEventListener('click', doScan);
     byId('btn-regen').addEventListener('click', doRegenToken);
+    byId('btn-regen2').addEventListener('click', doRegenToken);
     byId('btn-save').addEventListener('click', doSave);
     byId('btn-factory').addEventListener('click', doFactoryReset);
     byId('btn-clear').addEventListener('click', clearConsole);

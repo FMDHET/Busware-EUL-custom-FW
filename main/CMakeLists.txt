@@ -12,6 +12,8 @@ idf_component_register(
         "tcp_server.c"
         "http_portal.c"
         "console_log.c"
+        "telemetry.c"
+        "mqtt_bridge.c"
         "mode_mgr.c"
     INCLUDE_DIRS
         "."
@@ -33,4 +35,5 @@ idf_component_register(
         mbedtls
         json
         mdns
+        mqtt
 )

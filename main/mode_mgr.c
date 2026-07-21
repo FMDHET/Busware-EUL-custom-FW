@@ -11,6 +11,8 @@
 #include "tcp_server.h"
 #include "http_portal.h"
 #include "console_log.h"
+#include "telemetry.h"
+#include "mqtt_bridge.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -38,6 +40,7 @@ static void on_uart_rx(const uint8_t *data, size_t len, void *user)
     (void)user;
     usb_cdc_gateway_broadcast(data, len);
     tcp_server_broadcast(data, len);
+    telemetry_feed_rx(data, len);   // ESP3-Parser fuer /api/telegrams + MQTT
 }
 
 // -----------------------------------------------------------------------------
@@ -159,6 +162,19 @@ static void run_normal(const eul_config_t *cfg)
     // ohne Factory-Reset umkonfigurieren kann.
     ESP_ERROR_CHECK(http_portal_start(false));
 
+    // MQTT-Bridge (optional): publish empfangene Telegramme, subscribe command.
+    if (cfg->mqtt_enabled) {
+        if (cfg->mqtt_topic[0]) {
+            mqtt_bridge_start(cfg->mqtt_host, cfg->mqtt_port,
+                              cfg->mqtt_user, cfg->mqtt_pass, cfg->mqtt_topic);
+        } else {
+            char topic[EUL_MQTT_TOPIC_MAX + 16];
+            snprintf(topic, sizeof(topic), "eul22/%s", config_device_suffix());
+            mqtt_bridge_start(cfg->mqtt_host, cfg->mqtt_port,
+                              cfg->mqtt_user, cfg->mqtt_pass, topic);
+        }
+    }
+
     // USB CDC bewusst zuletzt: sobald aktiv, wird esp_log stumm geschaltet.
     if (cfg->usb_enabled) {
         ESP_ERROR_CHECK(usb_cdc_gateway_start());
@@ -185,6 +201,7 @@ esp_err_t mode_mgr_start(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     console_log_init();
+    telemetry_init();
 
     eul_config_t cfg;
     ESP_ERROR_CHECK(config_load(&cfg));

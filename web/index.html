@@ -81,8 +81,7 @@ nav.tabs button.active {
 main {
   flex:1;
   padding:12px 16px 100px;   /* bottom padding fuer sticky footer */
-  max-width:760px;
-  width:100%;
+  width:100%;                /* volle Fensterbreite */
   margin:0 auto;
 }
 .tab { display:none; }
@@ -271,7 +270,7 @@ footer.actions {
   display:flex;
   gap:8px;
   justify-content:center;
-  max-width:760px;
+  width:100%;
   margin:0 auto;
 }
 footer.actions button {
@@ -304,6 +303,8 @@ a { color:var(--brand); }
   <button data-tab="wifi">WiFi</button>
   <button data-tab="usb">USB</button>
   <button data-tab="enocean">EnOcean</button>
+  <button data-tab="api">API</button>
+  <button data-tab="mqtt">MQTT</button>
   <button data-tab="konsole">Konsole</button>
 </nav>
 
@@ -402,6 +403,45 @@ a { color:var(--brand); }
         <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
         <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;font-size:12px;padding:10px"></pre>
       </div>
+    </fieldset>
+  </section>
+
+  <!-- =============================================================== API -->
+  <section class="tab" id="tab-api">
+    <fieldset><legend>REST-API</legend>
+      <label class="inline"><input type="checkbox" id="api_en"> REST-API aktivieren</label>
+      <div class="hint">HTTP-Zugriff auf empfangene Telegramme und zum Senden. Authentifizierung ueber den Geraete-Token, per Header <code>Authorization: Bearer &lt;token&gt;</code> oder Query <code>?token=&lt;token&gt;</code>.</div>
+      <label>Geraete-Token</label>
+      <div class="row">
+        <div id="api_token" class="secret"></div>
+        <button type="button" class="ghost" id="btn-regen2">Neu erzeugen</button>
+      </div>
+      <div class="hint">Derselbe Token wie fuer die TCP-Bridge (Reiter EnOcean).</div>
+    </fieldset>
+
+    <fieldset><legend>Endpunkte</legend>
+      <pre id="api_doc" class="mono" style="white-space:pre-wrap;overflow:auto;font-size:12px;padding:10px">API deaktiviert oder Adresse unbekannt.</pre>
+    </fieldset>
+  </section>
+
+  <!-- ============================================================== MQTT -->
+  <section class="tab" id="tab-mqtt">
+    <fieldset><legend>MQTT-Broker</legend>
+      <label class="inline"><input type="checkbox" id="mqtt_en"> MQTT-Client aktivieren</label>
+      <label>Broker-Host</label>
+      <input type="text" id="mqtt_host" maxlength="63" autocomplete="off" placeholder="z.B. 192.168.177.1 oder homeassistant.local">
+      <label>Port</label>
+      <input type="number" id="mqtt_port" value="1883" min="1" max="65535">
+      <label>Benutzer <span class="hint">(optional)</span></label>
+      <input type="text" id="mqtt_user" maxlength="47" autocomplete="off">
+      <label>Passwort <span class="hint">(leer = unveraendert)</span></label>
+      <input type="password" id="mqtt_pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
+      <label>Basis-Topic</label>
+      <input type="text" id="mqtt_topic" maxlength="47" placeholder="eul22/xxxxxx (leer = automatisch)">
+    </fieldset>
+
+    <fieldset><legend>Topics</legend>
+      <div id="mqtt_doc" class="hint" style="white-space:pre-wrap"></div>
     </fieldset>
   </section>
 
