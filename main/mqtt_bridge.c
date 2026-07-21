@@ -20,6 +20,7 @@ static const char *TAG = "eul-mqtt";
 #define SEEN_MAX 48
 
 static esp_mqtt_client_handle_t s_client;
+static volatile bool s_connected;      // nur wenn true wird publiziert
 static char s_base[64];
 static char s_topic_rx[96];
 static char s_topic_send[96];
@@ -86,7 +87,7 @@ static void pub_gw_sensor(const char *key, const char *payload)
 {
     char topic[128];
     snprintf(topic, sizeof(topic), "%s/sensor/eul22_%s/%s/config", s_prefix, s_suffix, key);
-    esp_mqtt_client_publish(s_client, topic, payload, strlen(payload), 0, 1);
+    esp_mqtt_client_enqueue(s_client, topic, payload, strlen(payload), 0, 1, true);
 }
 
 static void publish_gw_discovery(void)
@@ -133,7 +134,7 @@ static void publish_sender_discovery(const char *sid)
         s_suffix, sid, s_base, sid, s_base, sid, s_topic_avail,
         s_suffix, sid, sid, s_suffix);
     if (n > 0 && n < (int)sizeof(pl)) {
-        esp_mqtt_client_publish(s_client, topic, pl, n, 0, 1);
+        esp_mqtt_client_enqueue(s_client, topic, pl, n, 0, 1, true);
         ESP_LOGI(TAG, "HA-Discovery fuer Sender %s", sid);
     }
 }
@@ -142,20 +143,27 @@ static void publish_sender_discovery(const char *sid)
 static void on_frame(const uint8_t *frame, size_t len, void *user)
 {
     (void)user;
-    if (!s_client) return;
+    // Nur bei bestehender Broker-Verbindung publizieren. So macht der UART-RX-
+    // Task bei getrenntem MQTT (Broker/Mesh weg) NULL MQTT-Arbeit und kann
+    // dadurch nie blockieren.
+    if (!s_client || !s_connected) return;
 
     char json[256];
     int n = telemetry_frame_to_json(frame, len, json, sizeof(json));
     if (n <= 0) return;
 
-    esp_mqtt_client_publish(s_client, s_topic_rx, json, n, 0, 0);   // Stream
+    // WICHTIG: enqueue statt publish - publish blockiert den UART-RX-Task bis
+    // zu network_timeout (~10s), wenn der Broker nicht erreichbar ist (Mesh-
+    // Aussetzer) und laesst damit das ganze Gateway haengen. store=false ->
+    // bei Trennung verwerfen statt Outbox/Heap zu fluten.
+    esp_mqtt_client_enqueue(s_client, s_topic_rx, json, n, 0, 0, false);   // Stream
 
     char sid[9];
     if (!frame_sender(frame, len, sid)) return;
 
     char dev_topic[96];
     snprintf(dev_topic, sizeof(dev_topic), "%s/dev/%s", s_base, sid);
-    esp_mqtt_client_publish(s_client, dev_topic, json, n, 0, s_retain ? 1 : 0);
+    esp_mqtt_client_enqueue(s_client, dev_topic, json, n, 0, s_retain ? 1 : 0, false);
 
     if (s_discovery && mark_seen(sid)) publish_sender_discovery(sid);
 }
@@ -163,7 +171,7 @@ static void on_frame(const uint8_t *frame, size_t len, void *user)
 static void gw_stats_publish(void *arg)
 {
     (void)arg;
-    if (!s_client) return;
+    if (!s_client || !s_connected) return;
     int rssi = 0;
     esp_wifi_sta_get_rssi(&rssi);
     const char *ip = wifi_sta_ip_str();
@@ -172,7 +180,7 @@ static void gw_stats_publish(void *arg)
         "{\"rssi\":%d,\"uptime_s\":%lld,\"clients\":%d,\"ip\":\"%s\"}",
         rssi, (long long)(esp_timer_get_time() / 1000000),
         tcp_server_active_clients(), ip ? ip : "");
-    esp_mqtt_client_publish(s_client, s_topic_gw, pl, n, 0, s_retain ? 1 : 0);
+    esp_mqtt_client_enqueue(s_client, s_topic_gw, pl, n, 0, s_retain ? 1 : 0, false);
 }
 
 static void mqtt_event_handler(void *args, esp_event_base_t base,
@@ -183,7 +191,8 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-        esp_mqtt_client_publish(s_client, s_topic_avail, "online", 6, 0, 1);
+        s_connected = true;
+        esp_mqtt_client_enqueue(s_client, s_topic_avail, "online", 6, 0, 1, true);
         esp_mqtt_client_subscribe(s_client, s_topic_send, 0);
         // Sender nach (Re)connect neu ankuendigen (Discovery ist retained).
         xSemaphoreTake(s_seen_mtx, portMAX_DELAY);
@@ -195,6 +204,7 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DISCONNECTED:
+        s_connected = false;
         EVT_WARN("mqtt", "getrennt");
         break;
 
