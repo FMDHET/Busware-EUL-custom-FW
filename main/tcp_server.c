@@ -21,8 +21,13 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 
 static const char *TAG = "eul-tcp";
+
+// Unter dieser freien Heap-Grenze werden neue Verbindungen abgelehnt, damit ein
+// Verbindungs-Flood (Lasttest/DoS) das System nicht in den OOM-Crash treibt.
+#define EUL_MIN_FREE_HEAP  40000
 
 typedef struct {
     bool                 active;
@@ -273,8 +278,22 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
 
     if (!slot->tx) { close_slot_locked(slot); xSemaphoreGive(s_slots_mtx); return false; }
 
-    xTaskCreate(client_rx_task, "eul-cli-rx", 4096, slot, 10, NULL);
-    xTaskCreate(client_tx_task, "eul-cli-tx", 4096, slot, 10, NULL);
+    // Task-Erzeugung pruefen: schlaegt sie bei wenig RAM fehl, sauber ablehnen
+    // statt mit halb-initialisiertem Slot weiterzulaufen (fuehrte zum Crash).
+    if (xTaskCreate(client_rx_task, "eul-cli-rx", 4096, slot, 10, NULL) != pdPASS) {
+        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer RX-Task", slot->peer);
+        close_slot_locked(slot);                 // kein Task laeuft -> direkt freigeben
+        xSemaphoreGive(s_slots_mtx);
+        return false;
+    }
+    if (xTaskCreate(client_tx_task, "eul-cli-tx", 2560, slot, 10, NULL) != pdPASS) {
+        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer TX-Task", slot->peer);
+        // RX-Task laeuft schon und raeumt auf, sobald active=false + Socket zu.
+        slot->active = false;
+        if (slot->sock >= 0) shutdown(slot->sock, SHUT_RDWR);
+        xSemaphoreGive(s_slots_mtx);
+        return false;
+    }
     xSemaphoreGive(s_slots_mtx);
 
     ESP_LOGI(TAG, "client %s connected%s", slot->peer,
@@ -319,6 +338,17 @@ static void accept_task(void *arg)
         if (s_auth_req && rl_is_blocked(ip_be)) {
             sec_event("auth_blocked", "connect from blocked ip %08lx dropped",
                       (unsigned long)ip_be);
+            close(csock);
+            continue;
+        }
+
+        // Heap-Schutz: bei wenig freiem RAM ablehnen statt durch Task-/Puffer-
+        // Allokation den OOM-Crash zu riskieren (Flood/Lasttest).
+        uint32_t free_heap = esp_get_free_heap_size();
+        if (free_heap < EUL_MIN_FREE_HEAP) {
+            ESP_LOGW(TAG, "low heap (%u) - rejecting connection", (unsigned)free_heap);
+            EVT_WARN("tcp", "Verbindung abgelehnt: wenig Speicher (%u B frei)",
+                     (unsigned)free_heap);
             close(csock);
             continue;
         }

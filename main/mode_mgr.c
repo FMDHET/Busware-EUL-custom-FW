@@ -207,9 +207,10 @@ static void net_tick(void *arg)
         cnt = 0;
         int rssi = 0;
         esp_wifi_sta_get_rssi(&rssi);
-        EVT_INFO("net", "status rssi=%d dBm ip=%s clients=%d",
+        EVT_INFO("net", "status rssi=%d dBm ip=%s clients=%d heap=%u",
                  rssi, wifi_sta_ip_str() ? wifi_sta_ip_str() : "-",
-                 tcp_server_active_clients());
+                 tcp_server_active_clients(),
+                 (unsigned)esp_get_free_heap_size());
     }
 }
 
@@ -269,11 +270,12 @@ static void run_normal(const eul_config_t *cfg)
         ESP_ERROR_CHECK(usb_cdc_gateway_start());
     }
 
-    ESP_LOGI(TAG, "gateway up - ip=%s tcp=%s(auth=%s) usb=%s",
+    ESP_LOGI(TAG, "gateway up - ip=%s tcp=%s(auth=%s) usb=%s heap=%u",
              wifi_sta_ip_str() ? wifi_sta_ip_str() : "?",
              cfg->tcp_enabled ? "on"  : "off",
              cfg->tcp_auth_required ? "on" : "off",
-             cfg->usb_enabled ? "on"  : "off");
+             cfg->usb_enabled ? "on"  : "off",
+             (unsigned)esp_get_free_heap_size());
 
     const esp_timer_create_args_t net_ta = { .callback = net_tick, .name = "eul-net" };
     esp_timer_handle_t net_th;

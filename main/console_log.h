@@ -8,7 +8,7 @@
 // Frontend per "?since=<seq>" nur neue Zeilen abholt.
 
 #define EUL_CONSOLE_LINE_MAX   160
-#define EUL_CONSOLE_RING_SIZE  200
+#define EUL_CONSOLE_RING_SIZE  128   // kleiner = mehr freier Heap fuer TCP-Clients
 
 void console_log_init(void);
 

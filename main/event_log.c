@@ -10,7 +10,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 
-#define EVT_RING     120
+#define EVT_RING     80
 #define EVT_MSG_MAX  120
 #define EVT_TAG_MAX  12
 
