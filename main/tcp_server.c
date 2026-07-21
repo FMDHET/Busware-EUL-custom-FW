@@ -5,6 +5,7 @@
 #include "enocean_uart.h"
 #include "security.h"
 #include "console_log.h"
+#include "event_log.h"
 
 #include <string.h>
 #include <errno.h>
@@ -141,6 +142,9 @@ static void close_slot_locked(client_slot_t *c)
                  (unsigned long long)c->rx_bytes,
                  (unsigned long long)c->tx_bytes,
                  (unsigned)c->rx_frames);
+    EVT_INFO("tcp", "Client %s getrennt (rx=%llu tx=%llu frames=%u)",
+             c->peer, (unsigned long long)c->rx_bytes,
+             (unsigned long long)c->tx_bytes, (unsigned)c->rx_frames);
     if (c->sock >= 0) { shutdown(c->sock, SHUT_RDWR); close(c->sock); c->sock = -1; }
     if (c->tx)        { vStreamBufferDelete(c->tx);   c->tx = NULL; }
     c->active = false;
@@ -277,6 +281,7 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
              s_auth_req ? " (auth required)" : "");
     console_logf("++ %s connected%s", slot->peer,
                  s_auth_req ? " (auth ok)" : "");
+    EVT_INFO("tcp", "Client %s verbunden", slot->peer);
     return true;
 }
 

@@ -3,6 +3,7 @@
 #include "enocean_uart.h"
 #include "tcp_server.h"
 #include "wifi_sta.h"
+#include "event_log.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -190,7 +191,11 @@ static void mqtt_event_handler(void *args, esp_event_base_t base,
         xSemaphoreGive(s_seen_mtx);
         if (s_discovery) publish_gw_discovery();
         gw_stats_publish(NULL);
-        ESP_LOGI(TAG, "verbunden (discovery=%d, retain=%d)", s_discovery, s_retain);
+        EVT_INFO("mqtt", "verbunden (discovery=%d, retain=%d)", s_discovery, s_retain);
+        break;
+
+    case MQTT_EVENT_DISCONNECTED:
+        EVT_WARN("mqtt", "getrennt");
         break;
 
     case MQTT_EVENT_DATA:

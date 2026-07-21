@@ -306,6 +306,7 @@ a { color:var(--brand); }
   <button data-tab="enocean">EnOcean</button>
   <button data-tab="api">API</button>
   <button data-tab="mqtt">MQTT</button>
+  <button data-tab="events">Events</button>
   <button data-tab="konsole">Konsole</button>
 </nav>
 
@@ -469,6 +470,23 @@ a { color:var(--brand); }
 
     <fieldset><legend>Topics</legend>
       <div id="mqtt_doc" class="hint" style="white-space:pre-wrap"></div>
+    </fieldset>
+  </section>
+
+  <!-- ============================================================ Events -->
+  <section class="tab" id="tab-events">
+    <fieldset><legend>Ereignisse</legend>
+      <div style="max-height:60vh;overflow:auto">
+        <table class="responsive">
+          <thead>
+            <tr><th>Zeit</th><th>Level</th><th>Quelle</th><th>Meldung</th></tr>
+          </thead>
+          <tbody id="evt_body">
+            <tr><td colspan="4" class="hint">warte auf Ereignisse...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint">Boot, WLAN (Verbindung/Trennung mit Grund), TCP-Clients, MQTT, Security, periodischer Netz-Status. Neueste oben.</div>
     </fieldset>
   </section>
 

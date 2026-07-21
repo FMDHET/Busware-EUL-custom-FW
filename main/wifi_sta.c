@@ -1,5 +1,6 @@
 #include "wifi_sta.h"
 #include "security.h"
+#include "event_log.h"
 #include "sdkconfig.h"
 
 #include <string.h>
@@ -33,6 +34,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         wifi_event_sta_disconnected_t *e = (wifi_event_sta_disconnected_t *)data;
         s_ip[0] = '\0';
         xEventGroupClearBits(s_wifi_evt, WIFI_CONNECTED_BIT);
+        EVT_WARN("wifi", "getrennt (reason=%d)", e->reason);
         if (s_ever_connected) {
             // Laufzeit-Drop nach schon erfolgreicher Verbindung: NIE aufgeben.
             // Der alte WIFI_MAX_RETRY-Deckel liess das Gateway nach einem
@@ -57,6 +59,9 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&e->ip_info.ip));
         ESP_LOGI(TAG, "got ip: %s", s_ip);
+        int rssi = 0;
+        esp_wifi_sta_get_rssi(&rssi);
+        EVT_INFO("wifi", "verbunden, IP %s (rssi %d dBm)", s_ip, rssi);
         s_retry = 0;
         s_ever_connected = true;
         xEventGroupSetBits(s_wifi_evt, WIFI_CONNECTED_BIT);

@@ -69,6 +69,20 @@ interface ConsoleResp {
     last_seq: number;
 }
 
+interface EvtLine {
+    seq: number;
+    ms: number;
+    ts: number;   // epoch ms (0 = nicht synchron)
+    lvl: number;  // 0=info 1=warn 2=err
+    tag: string;
+    msg: string;
+}
+
+interface EventResp {
+    events: EvtLine[];
+    last_seq: number;
+}
+
 interface SaveBody {
     tcp_enabled: boolean;
     tcp_port: number;
@@ -127,7 +141,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'api' | 'mqtt' | 'konsole';
+type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'api' | 'mqtt' | 'events' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -242,6 +256,7 @@ const api = {
     clients: (): Promise<Client[]> => apiJson('/api/clients'),
     stats: (): Promise<Stats> => apiJson('/api/stats'),
     console: (since: number): Promise<ConsoleResp> => apiJson(`/api/console?since=${since}`),
+    events: (since: number): Promise<EventResp> => apiJson(`/api/events?since=${since}`),
     save: (body: SaveBody): Promise<{ ok: boolean }> =>
         apiJson('/api/config', {
             method: 'POST',
@@ -709,6 +724,50 @@ async function pollConsole(): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
+// Events-Reiter (strukturierte Debug-Ereignisse)
+// -----------------------------------------------------------------------------
+let evtSeq = 0;
+const EVT_MAX = 200;
+const EVT_LABEL = ['INFO', 'WARN', 'FEHLER'];
+const EVT_COLOR = ['var(--hint)', '#c47f00', 'var(--danger)'];
+
+function fmtEventTime(ms: number, ts: number): string {
+    if (ts > 0) {
+        const d = new Date(ts);
+        const p2 = (x: number) => String(x).padStart(2, '0');
+        return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+    }
+    return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function renderEventRow(e: EvtLine): string {
+    const lvl = e.lvl >= 0 && e.lvl <= 2 ? e.lvl : 0;
+    return (
+        '<tr>' +
+        `<td data-label="Zeit" style="font-family:ui-monospace,monospace;white-space:nowrap">${fmtEventTime(e.ms, e.ts)}</td>` +
+        `<td data-label="Level" style="color:${EVT_COLOR[lvl]};font-weight:600">${EVT_LABEL[lvl]}</td>` +
+        `<td data-label="Quelle" style="font-family:ui-monospace,monospace">${escapeHtml(e.tag)}</td>` +
+        `<td data-label="Meldung">${escapeHtml(e.msg)}</td>` +
+        '</tr>'
+    );
+}
+
+async function pollEvents(): Promise<void> {
+    if (activeTabName() !== 'events') return;
+    try {
+        const j = await api.events(evtSeq);
+        evtSeq = j.last_seq;
+        if (!j.events.length) return;
+        const body = byId('evt_body');
+        if (body.querySelector('.hint')) body.innerHTML = '';
+        body.insertAdjacentHTML('afterbegin', j.events.map(renderEventRow).reverse().join(''));
+        while (body.children.length > EVT_MAX) body.removeChild(body.lastElementChild!);
+    } catch {
+        // silent
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Konsole: Copy / Select-All / Clear / Pause
 // -----------------------------------------------------------------------------
 function selectConsoleContents(): void {
@@ -803,9 +862,11 @@ function init(): void {
     setInterval(pollClients, 3000);
     setInterval(pollStats, 3000);
     setInterval(pollConsole, 1000);
+    setInterval(pollEvents, 2000);
     void pollClients();
     void pollStats();
     void pollConsole();
+    void pollEvents();
 }
 
 init();

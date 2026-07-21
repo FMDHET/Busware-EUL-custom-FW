@@ -1,4 +1,5 @@
 #include "security.h"
+#include "event_log.h"
 
 #include <string.h>
 #include <stdarg.h>
@@ -70,5 +71,6 @@ void sec_event(const char *event, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    ESP_LOGW("SEC", "%s: %s", event, buf);
+    // In den Event-Log (spiegelt selbst auf ESP_LOG).
+    event_log_add(EVT_LEVEL_WARN, event, "%s", buf);
 }

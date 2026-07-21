@@ -12,6 +12,7 @@ idf_component_register(
         "tcp_server.c"
         "http_portal.c"
         "console_log.c"
+        "event_log.c"
         "telemetry.c"
         "mqtt_bridge.c"
         "mode_mgr.c"

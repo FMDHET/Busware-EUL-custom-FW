@@ -6,6 +6,7 @@
 #include "tcp_server.h"
 #include "enocean_uart.h"
 #include "console_log.h"
+#include "event_log.h"
 #include "telemetry.h"
 #include "sdkconfig.h"
 
@@ -404,6 +405,27 @@ static esp_err_t h_console(httpd_req_t *req)
     return httpd_resp_send(req, out, n);
 }
 
+// GET /api/events?since=<seq> -> strukturierte Debug-Events (Basic-Auth)
+static esp_err_t h_events(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+
+    uint64_t since = 0;
+    char qbuf[64];
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+        char val[32];
+        if (httpd_query_key_value(qbuf, "since", val, sizeof(val)) == ESP_OK) {
+            since = strtoull(val, NULL, 10);
+        }
+    }
+    static char out[8192];
+    uint64_t last = since;
+    int n = event_log_dump_since(since, out, sizeof(out), &last);
+    if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, out, n);
+}
+
 // -----------------------------------------------------------------------------
 // REST-API (eigener Reiter): Token-Auth ueber den Geraete-Token (tcp_token),
 // per "Authorization: Bearer <token>" ODER "?token=<token>". Nur aktiv wenn
@@ -537,6 +559,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_co   = { .uri="/api/console", .method=HTTP_GET, .handler=h_console };
     httpd_uri_t u_tel  = { .uri="/api/telegrams", .method=HTTP_GET,  .handler=h_telegrams };
     httpd_uri_t u_snd  = { .uri="/api/send",      .method=HTTP_POST, .handler=h_send };
+    httpd_uri_t u_ev   = { .uri="/api/events",    .method=HTTP_GET,  .handler=h_events };
     // Captive-Portal-Erkennung bekannter Betriebssysteme: alles auf / umleiten
     httpd_uri_t u_gen  = { .uri="/generate_204", .method=HTTP_GET, .handler=h_captive };
     httpd_uri_t u_hs   = { .uri="/hotspot-detect.html", .method=HTTP_GET, .handler=h_captive };
@@ -555,6 +578,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_co);
     httpd_register_uri_handler(srv, &u_tel);
     httpd_register_uri_handler(srv, &u_snd);
+    httpd_register_uri_handler(srv, &u_ev);
     if (ap_mode) {
         httpd_register_uri_handler(srv, &u_gen);
         httpd_register_uri_handler(srv, &u_hs);

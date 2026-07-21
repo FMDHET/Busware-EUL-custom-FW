@@ -11,6 +11,7 @@
 #include "tcp_server.h"
 #include "http_portal.h"
 #include "console_log.h"
+#include "event_log.h"
 #include "telemetry.h"
 #include "mqtt_bridge.h"
 
@@ -23,10 +24,13 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_sntp.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "mdns.h"
+#include "lwip/sockets.h"
 
 #include <time.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -138,6 +142,45 @@ static void time_sync_start(const char *server)
 }
 
 // -----------------------------------------------------------------------------
+// Periodischer Netz-Tick (30s): kleiner UDP-Broadcast-Keepalive, damit das
+// FritzBox-Mesh/der Switch die MAC des Dongles in der Forwarding-Tabelle haelt
+// (Mitigation gegen zeitweise L2-Unerreichbarkeit hinter dem Repeater). Alle
+// ~120s zusaetzlich ein Netz-Status ins Event-Log (RSSI/IP/Clients).
+// -----------------------------------------------------------------------------
+static int s_ka_sock = -1;
+
+static void net_tick(void *arg)
+{
+    (void)arg;
+    static int cnt = 0;
+
+    if (s_ka_sock < 0) {
+        s_ka_sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if (s_ka_sock >= 0) {
+            int yes = 1;
+            setsockopt(s_ka_sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+        }
+    }
+    if (s_ka_sock >= 0) {
+        struct sockaddr_in a = {
+            .sin_family = AF_INET,
+            .sin_port = htons(9),                    // discard-Port
+            .sin_addr.s_addr = htonl(INADDR_BROADCAST),
+        };
+        static const char ka[] = "EUL22-keepalive";
+        sendto(s_ka_sock, ka, sizeof(ka) - 1, 0, (struct sockaddr *)&a, sizeof(a));
+    }
+    if (++cnt >= 4) {
+        cnt = 0;
+        int rssi = 0;
+        esp_wifi_sta_get_rssi(&rssi);
+        EVT_INFO("net", "status rssi=%d dBm ip=%s clients=%d",
+                 rssi, wifi_sta_ip_str() ? wifi_sta_ip_str() : "-",
+                 tcp_server_active_clients());
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Normalmodus: WiFi-STA, optional TCP-Server, optional USB-CDC
 // -----------------------------------------------------------------------------
 static void run_normal(const eul_config_t *cfg)
@@ -198,6 +241,11 @@ static void run_normal(const eul_config_t *cfg)
              cfg->tcp_enabled ? "on"  : "off",
              cfg->tcp_auth_required ? "on" : "off",
              cfg->usb_enabled ? "on"  : "off");
+
+    const esp_timer_create_args_t net_ta = { .callback = net_tick, .name = "eul-net" };
+    esp_timer_handle_t net_th;
+    if (esp_timer_create(&net_ta, &net_th) == ESP_OK)
+        esp_timer_start_periodic(net_th, 30ULL * 1000000ULL);
 }
 
 esp_err_t mode_mgr_start(void)
@@ -214,7 +262,9 @@ esp_err_t mode_mgr_start(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     console_log_init();
+    event_log_init();
     telemetry_init();
+    EVT_INFO("boot", "Busware EUL22 Firmware gestartet");
 
     eul_config_t cfg;
     ESP_ERROR_CHECK(config_load(&cfg));
