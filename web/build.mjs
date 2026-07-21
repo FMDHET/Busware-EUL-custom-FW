@@ -29,7 +29,10 @@ const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const finalHtml = html.replace('<!--SCRIPT-->', `<script>${js}</script>`);
 
 // Als C-String literalisieren. Zeilenweise, damit git-diffs lesbar sind.
-const cLines = finalHtml.split('\n').map((line) => {
+// CRLF/CR-robust splitten: bei einem Windows-Checkout (git autocrlf) hat
+// index.html sonst \r\n; ein zurueckbleibendes \r landet im C-String und wird
+// vom Compiler als Zeilenende gewertet -> "missing terminating character".
+const cLines = finalHtml.split(/\r\n|\r|\n/).map((line) => {
     const esc = line.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     return `"${esc}\\n"`;
 });
