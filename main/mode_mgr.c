@@ -123,14 +123,18 @@ static void run_provisioning(const eul_config_t *cfg)
 // Zeit per SNTP holen (nur Normalmodus, WiFi steht). Zeitzone Europe/Berlin
 // inkl. Sommerzeit, damit die Telegramme im Portal die echte Uhrzeit zeigen.
 // -----------------------------------------------------------------------------
-static void time_sync_start(void)
+static void time_sync_start(const char *server)
 {
+    // SNTP haelt den Server-Zeiger, daher in einen statischen Puffer kopieren.
+    static char s_ntp[EUL_NTP_MAX];
+    snprintf(s_ntp, sizeof(s_ntp), "%s", (server && server[0]) ? server : "pool.ntp.org");
+
     setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
     tzset();
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(0, s_ntp);
     esp_sntp_init();
-    ESP_LOGI(TAG, "sntp gestartet (pool.ntp.org), TZ=Europe/Berlin");
+    ESP_LOGI(TAG, "sntp gestartet (%s), TZ=Europe/Berlin", s_ntp);
 }
 
 // -----------------------------------------------------------------------------
@@ -150,7 +154,7 @@ static void run_normal(const eul_config_t *cfg)
     }
 
     mdns_up(cfg->tcp_port, cfg->tcp_enabled);
-    time_sync_start();
+    time_sync_start(cfg->ntp_server);
 
     if (cfg->tcp_enabled) {
         ESP_ERROR_CHECK(tcp_server_start(cfg->tcp_port,
@@ -162,17 +166,26 @@ static void run_normal(const eul_config_t *cfg)
     // ohne Factory-Reset umkonfigurieren kann.
     ESP_ERROR_CHECK(http_portal_start(false));
 
-    // MQTT-Bridge (optional): publish empfangene Telegramme, subscribe command.
+    // MQTT-Bridge (optional): publish empfangene Telegramme, subscribe command,
+    // LWT + optional HA-Autodiscovery.
     if (cfg->mqtt_enabled) {
-        if (cfg->mqtt_topic[0]) {
-            mqtt_bridge_start(cfg->mqtt_host, cfg->mqtt_port,
-                              cfg->mqtt_user, cfg->mqtt_pass, cfg->mqtt_topic);
-        } else {
-            char topic[EUL_MQTT_TOPIC_MAX + 16];
-            snprintf(topic, sizeof(topic), "eul22/%s", config_device_suffix());
-            mqtt_bridge_start(cfg->mqtt_host, cfg->mqtt_port,
-                              cfg->mqtt_user, cfg->mqtt_pass, topic);
-        }
+        char topic[EUL_MQTT_TOPIC_MAX + 16];
+        if (cfg->mqtt_topic[0]) snprintf(topic, sizeof(topic), "%s", cfg->mqtt_topic);
+        else                    snprintf(topic, sizeof(topic), "eul22/%s", config_device_suffix());
+
+        mqtt_bridge_cfg_t mc = {
+            .host        = cfg->mqtt_host,
+            .port        = cfg->mqtt_port,
+            .user        = cfg->mqtt_user,
+            .pass        = cfg->mqtt_pass,
+            .base_topic  = topic,
+            .device_name = cfg->device_name,
+            .suffix      = config_device_suffix(),
+            .discovery   = cfg->mqtt_discovery,
+            .disc_prefix = cfg->mqtt_disc_prefix,
+            .retain      = cfg->mqtt_retain,
+        };
+        mqtt_bridge_start(&mc);
     }
 
     // USB CDC bewusst zuletzt: sobald aktiv, wird esp_log stumm geschaltet.

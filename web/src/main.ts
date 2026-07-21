@@ -24,6 +24,12 @@ interface State {
     mqtt_port: number;
     mqtt_user: string;
     mqtt_topic: string;
+    mqtt_discovery: boolean;
+    mqtt_retain: boolean;
+    mqtt_disc_prefix: string;
+    device_name: string;
+    admin_user: string;
+    ntp_server: string;
 }
 
 interface Network {
@@ -74,7 +80,14 @@ interface SaveBody {
     mqtt_port: number;
     mqtt_user: string;
     mqtt_topic: string;
+    mqtt_discovery: boolean;
+    mqtt_retain: boolean;
+    mqtt_disc_prefix: string;
+    device_name: string;
+    admin_user: string;
+    ntp_server: string;
     mqtt_pass?: string;
+    admin_pass?: string;
     wifi_ssid?: string;
     wifi_pass?: string;
 }
@@ -114,7 +127,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'status' | 'wifi' | 'usb' | 'enocean' | 'api' | 'mqtt' | 'konsole';
+type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'api' | 'mqtt' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -298,6 +311,14 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('mqtt_user').value = s.mqtt_user || '';
         byId<HTMLInputElement>('mqtt_topic').value = s.mqtt_topic || '';
         apiTokenDisplay.set(s.tcp_token);
+        byId<HTMLInputElement>('dev_name').value = s.device_name || '';
+        byId<HTMLInputElement>('admin_user').value = s.admin_user || 'admin';
+        byId<HTMLInputElement>('ntp_server').value = s.ntp_server || 'pool.ntp.org';
+        byId<HTMLInputElement>('mqtt_disc').checked = s.mqtt_discovery;
+        byId<HTMLInputElement>('mqtt_ret').checked = s.mqtt_retain;
+        byId<HTMLInputElement>('mqtt_prefix').value = s.mqtt_disc_prefix || 'homeassistant';
+        const h1 = document.querySelector('header h1');
+        if (h1 && s.device_name) h1.textContent = s.device_name;
         renderApiDoc(s.tcp_token, s.api_enabled);
         renderMqttDoc(s.mqtt_topic, s.suffix);
         if (!s.tcp_auth_required && s.tcp_enabled) renderHAYaml();
@@ -397,9 +418,20 @@ async function doSave(): Promise<void> {
         mqtt_port: parseInt(byId<HTMLInputElement>('mqtt_port').value, 10) || 1883,
         mqtt_user: byId<HTMLInputElement>('mqtt_user').value.trim(),
         mqtt_topic: byId<HTMLInputElement>('mqtt_topic').value.trim(),
+        mqtt_discovery: byId<HTMLInputElement>('mqtt_disc').checked,
+        mqtt_retain: byId<HTMLInputElement>('mqtt_ret').checked,
+        mqtt_disc_prefix: byId<HTMLInputElement>('mqtt_prefix').value.trim(),
+        device_name: byId<HTMLInputElement>('dev_name').value.trim(),
+        admin_user: byId<HTMLInputElement>('admin_user').value.trim(),
+        ntp_server: byId<HTMLInputElement>('ntp_server').value.trim(),
     };
     const mqttPass = byId<HTMLInputElement>('mqtt_pass').value;
     if (mqttPass) body.mqtt_pass = mqttPass;
+    const adminPass = byId<HTMLInputElement>('admin_pass_new').value;
+    if (adminPass) {
+        if (adminPass.length < 8) { say('Neues Portal-Passwort braucht min. 8 Zeichen'); return; }
+        body.admin_pass = adminPass;
+    }
     const s = byId<HTMLInputElement>('ssid').value.trim();
     const p = byId<HTMLInputElement>('pass').value;
     if (s && p) {

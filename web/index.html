@@ -300,6 +300,7 @@ a { color:var(--brand); }
 
 <nav class="tabs" id="tabs">
   <button data-tab="status" class="active">Status</button>
+  <button data-tab="allgemein">Allgemein</button>
   <button data-tab="wifi">WiFi</button>
   <button data-tab="usb">USB</button>
   <button data-tab="enocean">EnOcean</button>
@@ -346,6 +347,31 @@ a { color:var(--brand); }
     </fieldset>
   </section>
 
+  <!-- ========================================================= Allgemein -->
+  <section class="tab" id="tab-allgemein">
+    <fieldset><legend>Geraet</legend>
+      <label>Geraetename</label>
+      <input type="text" id="dev_name" maxlength="39" autocomplete="off" placeholder="z.B. EnOcean Gateway Flur">
+      <div class="hint">Anzeigename im Portal-Titel und in Home Assistant.</div>
+    </fieldset>
+
+    <fieldset><legend>Portal-Login</legend>
+      <label>Benutzer</label>
+      <input type="text" id="admin_user" maxlength="23" autocomplete="off" placeholder="admin">
+      <label>Aktuelles Passwort <span class="hint">(nur beim Erst-Setup sichtbar)</span></label>
+      <div id="adminp" class="secret"></div>
+      <label>Neues Passwort <span class="hint">(leer = unveraendert, min. 8 Zeichen)</span></label>
+      <input type="password" id="admin_pass_new" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
+      <div class="hint">Login fuer dieses Portal im Normalbetrieb (STA-Modus).</div>
+    </fieldset>
+
+    <fieldset><legend>Zeit (NTP)</legend>
+      <label>NTP-Server</label>
+      <input type="text" id="ntp_server" maxlength="63" autocomplete="off" placeholder="pool.ntp.org">
+      <div class="hint">Zeitzone fest Europe/Berlin (inkl. Sommerzeit).</div>
+    </fieldset>
+  </section>
+
   <!-- ============================================================== WiFi -->
   <section class="tab" id="tab-wifi">
     <fieldset><legend>WLAN (Heimnetz)</legend>
@@ -358,13 +384,6 @@ a { color:var(--brand); }
       <input type="text" id="ssid" maxlength="32" autocomplete="off">
       <label>Passwort <span class="hint">(leer = bisheriges behalten)</span></label>
       <input type="password" id="pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
-    </fieldset>
-
-    <fieldset><legend>Portal-Zugang (STA-Modus)</legend>
-      <label>Benutzer</label><div class="mono">admin</div>
-      <label>Aktuelles Passwort</label>
-      <div id="adminp" class="secret"></div>
-      <div class="hint">Notieren - im STA-Modus ist das Portal nur mit diesem Login erreichbar.</div>
     </fieldset>
   </section>
 
@@ -438,6 +457,14 @@ a { color:var(--brand); }
       <input type="password" id="mqtt_pass" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
       <label>Basis-Topic</label>
       <input type="text" id="mqtt_topic" maxlength="47" placeholder="eul22/xxxxxx (leer = automatisch)">
+    </fieldset>
+
+    <fieldset><legend>Home Assistant</legend>
+      <label class="inline"><input type="checkbox" id="mqtt_disc"> HA-Autodiscovery aktivieren</label>
+      <label class="inline"><input type="checkbox" id="mqtt_ret"> State-Messages mit Retain senden</label>
+      <label>Discovery-Prefix</label>
+      <input type="text" id="mqtt_prefix" maxlength="31" placeholder="homeassistant">
+      <div class="hint">Legt in HA ein Gateway-Diagnose-Geraet (RSSI/Uptime/Clients) UND je Sender-ID automatisch ein Entity an. Verfuegbarkeit (LWT) auf <code>&lt;topic&gt;/status</code>.</div>
     </fieldset>
 
     <fieldset><legend>Topics</legend>

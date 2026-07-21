@@ -39,6 +39,41 @@ static size_t put_hex(char *o, size_t cap, size_t p,
     return p;
 }
 
+static const char *RPS_BTN[8] = {
+    "Wippe A unten", "Wippe A oben", "Wippe B unten", "Wippe B oben",
+    "Taste 5", "Taste 6", "Taste 7", "Taste 8"
+};
+
+// Klartext-Deutung (spiegelt die Frontend-Logik): RPS-Schalter, 1BS-Kontakt,
+// 4BS-Zentralkommando (A5-38-08). Leerer String wenn nicht deutbar.
+static void describe(char *out, size_t cap, uint8_t rorg,
+                     const uint8_t *pay, size_t pay_len, uint8_t status)
+{
+    out[0] = '\0';
+    if (rorg == 0xF6 && pay_len >= 1) {
+        uint8_t db0 = pay[0];
+        int eb = (db0 & 0x10) != 0;
+        if ((status & 0x20) == 0) {
+            snprintf(out, cap, "%s", eb ? "Taste(n) gedrueckt" : "losgelassen");
+        } else if (!eb && db0 == 0x00) {
+            snprintf(out, cap, "losgelassen");
+        } else if (db0 & 0x01) {
+            snprintf(out, cap, "%s %s + %s", RPS_BTN[(db0 >> 5) & 7],
+                     eb ? "gedrueckt" : "losgelassen", RPS_BTN[(db0 >> 1) & 7]);
+        } else {
+            snprintf(out, cap, "%s %s", RPS_BTN[(db0 >> 5) & 7],
+                     eb ? "gedrueckt" : "losgelassen");
+        }
+    } else if (rorg == 0xD5 && pay_len >= 1) {
+        snprintf(out, cap, (pay[0] & 0x01) ? "Kontakt geschlossen" : "Kontakt offen");
+    } else if (rorg == 0xA5 && pay_len == 4) {
+        uint8_t db3 = pay[0], db2 = pay[1], db0 = pay[3];
+        if ((db0 & 0x08) == 0)      snprintf(out, cap, "Lerntelegramm");
+        else if (db3 == 0x01)       snprintf(out, cap, (db0 & 0x01) ? "Einschalten" : "Ausschalten");
+        else if (db3 == 0x02)       snprintf(out, cap, "Dimmen auf %u%%%s", (unsigned)db2, (db0 & 0x01) ? "" : " (aus)");
+    }
+}
+
 // Formatiert einen ESP3-RADIO_ERP1-Frame als JSON-Objekt. 0 wenn kein
 // RADIO_ERP1 oder Puffer zu klein.
 static int format_frame(char *out, size_t cap, const uint8_t *frame, size_t len,
@@ -53,6 +88,7 @@ static int format_frame(char *out, size_t cap, const uint8_t *frame, size_t len,
     const uint8_t *data    = frame + 6;
     uint8_t        rorg    = data[0];
     const uint8_t *sender  = data + data_len - 5;
+    uint8_t        status  = data[data_len - 1];
     const uint8_t *payload = data + 1;
     size_t         pay_len = data_len - 6;
     const uint8_t *opt     = frame + 6 + data_len;
@@ -77,8 +113,10 @@ static int format_frame(char *out, size_t cap, const uint8_t *frame, size_t len,
     p += (size_t)n;
     p = put_hex(out, cap, p, frame, len, 0);
 
-    if (has_dbm) n = snprintf(out + p, cap - p, "\",\"dbm\":%d}", dbm);
-    else         n = snprintf(out + p, cap - p, "\",\"dbm\":null}");
+    char text[80];
+    describe(text, sizeof(text), rorg, payload, pay_len, status);
+    if (has_dbm) n = snprintf(out + p, cap - p, "\",\"text\":\"%s\",\"dbm\":%d}", text, dbm);
+    else         n = snprintf(out + p, cap - p, "\",\"text\":\"%s\",\"dbm\":null}", text);
     if (n < 0 || (size_t)n >= cap - p) return 0;
     p += (size_t)n;
     return (int)p;

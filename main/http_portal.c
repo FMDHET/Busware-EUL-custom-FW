@@ -49,8 +49,9 @@ static bool check_basic_auth(httpd_req_t *req, const eul_config_t *cfg)
     }
     dec[dec_len] = 0;
 
-    char expected[64];
-    snprintf(expected, sizeof(expected), "admin:%s", cfg->admin_pass);
+    char expected[96];
+    const char *user = (cfg->admin_user[0]) ? cfg->admin_user : "admin";
+    snprintf(expected, sizeof(expected), "%s:%s", user, cfg->admin_pass);
 
     if (sec_constant_time_equal((const char *)dec, expected)) return true;
 
@@ -110,6 +111,12 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "mqtt_port",   cfg.mqtt_port);
     cJSON_AddStringToObject(root, "mqtt_user",   cfg.mqtt_user);
     cJSON_AddStringToObject(root, "mqtt_topic",  cfg.mqtt_topic);
+    cJSON_AddBoolToObject(root, "mqtt_discovery",    cfg.mqtt_discovery);
+    cJSON_AddBoolToObject(root, "mqtt_retain",       cfg.mqtt_retain);
+    cJSON_AddStringToObject(root, "mqtt_disc_prefix", cfg.mqtt_disc_prefix);
+    cJSON_AddStringToObject(root, "device_name", cfg.device_name);
+    cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
+    cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
     // mqtt_pass wird nie ausgeliefert - nur setzbar (leer = unveraendert).
     // Admin-Pass nur im AP-Modus einmalig anzeigen. Im STA nur Platzhalter.
     cJSON_AddStringToObject(root, "admin_pass",
@@ -246,6 +253,21 @@ static esp_err_t h_config(httpd_req_t *req)
         (ta   && cJSON_IsBool(ta))     ? cJSON_IsTrue(ta)  : cur.tcp_auth_required,
         (port && cJSON_IsNumber(port)) ? (uint16_t)port->valueint : cur.tcp_port);
 
+    // Allgemein: Geraetename, Login-Benutzer, NTP-Server.
+    const cJSON *dev_name = cJSON_GetObjectItem(j, "device_name");
+    const cJSON *adm_user = cJSON_GetObjectItem(j, "admin_user");
+    const cJSON *ntp_srv  = cJSON_GetObjectItem(j, "ntp_server");
+    esp_err_t rg = config_save_general(
+        (dev_name && cJSON_IsString(dev_name)) ? dev_name->valuestring : cur.device_name,
+        (adm_user && cJSON_IsString(adm_user) && adm_user->valuestring[0]) ? adm_user->valuestring : cur.admin_user,
+        (ntp_srv  && cJSON_IsString(ntp_srv)  && ntp_srv->valuestring[0])  ? ntp_srv->valuestring  : cur.ntp_server);
+
+    // Neues Portal-Passwort nur wenn geliefert (>=8 Zeichen), sonst unveraendert.
+    const cJSON *adm_pass = cJSON_GetObjectItem(j, "admin_pass");
+    if (adm_pass && cJSON_IsString(adm_pass) && adm_pass->valuestring && strlen(adm_pass->valuestring) >= 8) {
+        (void)config_set_admin_pass(adm_pass->valuestring);
+    }
+
     // REST-API + MQTT. mqtt_pass leer => bisheriges Passwort behalten.
     const cJSON *api_en   = cJSON_GetObjectItem(j, "api_enabled");
     const cJSON *mq_en    = cJSON_GetObjectItem(j, "mqtt_enabled");
@@ -254,6 +276,9 @@ static esp_err_t h_config(httpd_req_t *req)
     const cJSON *mq_user  = cJSON_GetObjectItem(j, "mqtt_user");
     const cJSON *mq_pass  = cJSON_GetObjectItem(j, "mqtt_pass");
     const cJSON *mq_topic = cJSON_GetObjectItem(j, "mqtt_topic");
+    const cJSON *mq_disc  = cJSON_GetObjectItem(j, "mqtt_discovery");
+    const cJSON *mq_ret   = cJSON_GetObjectItem(j, "mqtt_retain");
+    const cJSON *mq_pref  = cJSON_GetObjectItem(j, "mqtt_disc_prefix");
     bool mp_set = mq_pass && cJSON_IsString(mq_pass) && mq_pass->valuestring && mq_pass->valuestring[0];
 
     esp_err_t ri = config_save_integrations(
@@ -263,11 +288,14 @@ static esp_err_t h_config(httpd_req_t *req)
         (mq_port  && cJSON_IsNumber(mq_port))  ? (uint16_t)mq_port->valueint : cur.mqtt_port,
         (mq_user  && cJSON_IsString(mq_user))  ? mq_user->valuestring : cur.mqtt_user,
         mp_set                                 ? mq_pass->valuestring : cur.mqtt_pass,
-        (mq_topic && cJSON_IsString(mq_topic)) ? mq_topic->valuestring : cur.mqtt_topic);
+        (mq_topic && cJSON_IsString(mq_topic)) ? mq_topic->valuestring : cur.mqtt_topic,
+        (mq_disc  && cJSON_IsBool(mq_disc))    ? cJSON_IsTrue(mq_disc) : cur.mqtt_discovery,
+        (mq_ret   && cJSON_IsBool(mq_ret))     ? cJSON_IsTrue(mq_ret)  : cur.mqtt_retain,
+        (mq_pref  && cJSON_IsString(mq_pref))  ? mq_pref->valuestring  : cur.mqtt_disc_prefix);
 
     cJSON_Delete(j);
 
-    if (rm != ESP_OK || ri != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (rm != ESP_OK || ri != ESP_OK || rg != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     sec_event("config_change", "applied via portal");
     httpd_resp_sendstr(req, "{\"ok\":true}");
     schedule_reboot();

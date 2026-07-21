@@ -18,6 +18,11 @@
 #define EUL_MQTT_USER_MAX      48
 #define EUL_MQTT_PASS_MAX      64
 #define EUL_MQTT_TOPIC_MAX     48
+#define EUL_MQTT_PREFIX_MAX    32
+
+#define EUL_DEV_NAME_MAX       40
+#define EUL_ADMIN_USER_MAX     24
+#define EUL_NTP_MAX            64
 
 typedef struct {
     bool     provisioned;                    // WiFi-Setup abgeschlossen?
@@ -26,16 +31,24 @@ typedef struct {
     bool     tcp_auth_required;              // AUTH-Handshake erzwingen?
     uint16_t tcp_port;
 
+    // Allgemein
+    char     device_name[EUL_DEV_NAME_MAX];  // Anzeigename (Portal, MQTT/HA)
+    char     admin_user[EUL_ADMIN_USER_MAX]; // Portal-Login-Benutzer (Default admin)
+    char     ntp_server[EUL_NTP_MAX];        // SNTP-Server (Default pool.ntp.org)
+
     // REST-API (lesen/senden per HTTP, Auth ueber tcp_token)
     bool     api_enabled;
 
     // MQTT-Client (publish empfangene Telegramme, subscribe command-topic)
     bool     mqtt_enabled;
+    bool     mqtt_discovery;                  // HA MQTT-Autodiscovery
+    bool     mqtt_retain;                     // State-Messages mit retain
     uint16_t mqtt_port;
     char     mqtt_host[EUL_MQTT_HOST_MAX];
     char     mqtt_user[EUL_MQTT_USER_MAX];
     char     mqtt_pass[EUL_MQTT_PASS_MAX];
-    char     mqtt_topic[EUL_MQTT_TOPIC_MAX];  // Basis-Topic, z.B. "eul22/xxxxxx"
+    char     mqtt_topic[EUL_MQTT_TOPIC_MAX];   // Basis-Topic, z.B. "eul22/xxxxxx"
+    char     mqtt_disc_prefix[EUL_MQTT_PREFIX_MAX]; // HA Discovery-Prefix (homeassistant)
 
     char     wifi_ssid[EUL_WIFI_SSID_MAX];
     char     wifi_pass[EUL_WIFI_PASS_MAX];
@@ -69,6 +82,11 @@ esp_err_t config_save_modes(bool usb_enabled,
                              bool tcp_auth_required,
                              uint16_t tcp_port);
 
+// Schreibt Allgemein-Einstellungen (Name, Login-User, NTP-Server).
+esp_err_t config_save_general(const char *device_name,
+                               const char *admin_user,
+                               const char *ntp_server);
+
 // Schreibt REST-API- und MQTT-Einstellungen (nur diese Keys).
 esp_err_t config_save_integrations(bool api_enabled,
                                     bool mqtt_enabled,
@@ -76,7 +94,10 @@ esp_err_t config_save_integrations(bool api_enabled,
                                     uint16_t mqtt_port,
                                     const char *mqtt_user,
                                     const char *mqtt_pass,
-                                    const char *mqtt_topic);
+                                    const char *mqtt_topic,
+                                    bool mqtt_discovery,
+                                    bool mqtt_retain,
+                                    const char *mqtt_disc_prefix);
 
 // Erzeugt einen frischen TCP-Auth-Token, persistiert nur diesen Key.
 esp_err_t config_regen_tcp_token(char *out, size_t out_size);
