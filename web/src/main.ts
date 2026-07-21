@@ -592,8 +592,10 @@ async function copyConsole(): Promise<void> {
 }
 
 function clearConsole(): void {
+    // Nur die Anzeige leeren - den Cursor NICHT auf 0 zuruecksetzen. Sonst
+    // wuerde der naechste Poll den kompletten Backlog nachladen (seit dem
+    // gemeinsamen Cursor mit dem Telegramm-Feed) und bei vollem Ring haengen.
     byId('con').textContent = '';
-    conSeq = 0;
     say('Konsole geleert');
 }
 

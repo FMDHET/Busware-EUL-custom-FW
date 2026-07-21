@@ -124,35 +124,43 @@ int console_log_dump_since(uint64_t since_seq, char *buf, size_t buf_size,
 
     xSemaphoreTake(s_mtx, portMAX_DELAY);
 
-    // Iteriere aelteste -> juengste
+    // Iteriere aelteste -> juengste. Platz fuer den Abschluss
+    // "],\"last_seq\":<=20 stellig>}" reservieren, damit die Antwort bei vollem
+    // Puffer NIE ungueltig wird: passt eine Zeile nicht mehr komplett, brechen
+    // wir sauber ab (Rollback) und liefern das gueltige last_seq der letzten
+    // vollstaendig geschriebenen Zeile. Der Client holt den Rest im naechsten
+    // Poll ab - kein -1/HTTP-500 mehr, das sonst den Cursor blockierte.
     bool first = true;
     uint64_t local_last = since_seq;
+    const size_t reserve = 40;
+    size_t limit = (buf_size > reserve) ? (buf_size - reserve) : 0;
     for (int i = 0; i < EUL_CONSOLE_RING_SIZE; i++) {
         int idx = (s_head + i) % EUL_CONSOLE_RING_SIZE;
         const entry_t *e = &s_ring[idx];
         if (e->seq == 0 || e->seq <= since_seq) continue;
+
+        size_t start = p;   // Rollback-Punkt falls das Element nicht mehr passt
         if (!first) {
-            if (p + 1 >= buf_size) break;
+            if (p + 1 >= limit) break;
             buf[p++] = ',';
         }
-        first = false;
         // Element: {"seq":N,"ms":M,"line":"..."}
         int n = snprintf(buf + p, buf_size - p,
                          "{\"seq\":%llu,\"ms\":%lld,\"line\":\"",
                          (unsigned long long)e->seq,
                          (long long)(e->ts_us / 1000));
-        if (n < 0 || (size_t)n >= buf_size - p) break;
+        if (n < 0 || p + (size_t)n >= limit) { p = start; break; }
         p += (size_t)n;
-        p += append_json_str(buf + p, buf_size - p, e->line);
-        if (p + 2 >= buf_size) break;
+        p += append_json_str(buf + p, limit - p, e->line);
+        if (p + 2 >= limit) { p = start; break; }
         buf[p++] = '"';
         buf[p++] = '}';
+        first = false;
         local_last = e->seq;
     }
 
     xSemaphoreGive(s_mtx);
 
-    if (p + 32 >= buf_size) return -1;
     p += snprintf(buf + p, buf_size - p,
                   "],\"last_seq\":%llu}", (unsigned long long)local_last);
 
