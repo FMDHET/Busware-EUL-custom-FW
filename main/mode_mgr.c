@@ -278,6 +278,19 @@ esp_err_t mode_mgr_start(void)
     telemetry_init();
     EVT_INFO("boot", "Busware EUL22 Firmware gestartet");
 
+    // Grund des vorigen Neustarts protokollieren - so ist im Event-Log
+    // erkennbar, ob es ein echter Absturz (Panik/Watchdog) war oder nur ein
+    // normaler Reset/Power-Cycle/Mesh-Neustart.
+    esp_reset_reason_t rr = esp_reset_reason();
+    if (rr == ESP_RST_PANIC || rr == ESP_RST_TASK_WDT ||
+        rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) {
+        EVT_WARN("boot", "voriger Neustart durch ABSTURZ/Watchdog (reason=%d)", (int)rr);
+    } else if (rr == ESP_RST_BROWNOUT) {
+        EVT_WARN("boot", "voriger Neustart durch Brownout (Stromversorgung)");
+    } else {
+        EVT_INFO("boot", "reset-reason=%d (1=Power 3=SW 8=USB)", (int)rr);
+    }
+
     eul_config_t cfg;
     ESP_ERROR_CHECK(config_load(&cfg));
 

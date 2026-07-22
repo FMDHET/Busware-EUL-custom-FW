@@ -30,7 +30,8 @@ static const char *TAG = "eul-tcp";
 #define EUL_MIN_FREE_HEAP  40000
 
 typedef struct {
-    bool                 active;
+    bool                 in_use;     // Slot belegt (erst nach close_slot wieder frei)
+    bool                 active;     // Tasks sollen weiterlaufen
     bool                 authed;
     bool                 cleaned;    // idempotent-flag fuer close_slot
     volatile bool        tx_running; // von TX-Task gesetzt/geloescht
@@ -155,6 +156,10 @@ static void close_slot_locked(client_slot_t *c)
     c->active = false;
     c->authed = false;
     c->peer[0] = '\0';
+    // ERST hier - nach vollstaendigem Aufraeumen - wird der Slot wieder frei.
+    // Sonst koennte spawn_client ihn per memset wiederverwenden, waehrend die
+    // alten Tasks noch darauf zeigen (Use-after-free -> Crash).
+    c->in_use = false;
 }
 
 static void close_slot(client_slot_t *c)
@@ -250,7 +255,11 @@ static void client_tx_task(void *arg)
             c->tx_bytes += (uint64_t)sent;
         }
     }
-    // Kein close_slot mehr hier - RX-Task raeumt auf, sobald tx_running=false.
+    // Falls WIR den Abbruch ausgeloest haben (Sende-Fehler), den Socket
+    // herunterfahren, damit der im recv() blockierende RX-Task garantiert
+    // aufwacht und aufraeumt (sonst haengt er und der Slot bleibt belegt).
+    // RX-Task raeumt auf, sobald tx_running=false.
+    if (c->sock >= 0) shutdown(c->sock, SHUT_RDWR);
     c->tx_running = false;
     vTaskDelete(NULL);
 }
@@ -260,15 +269,21 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     client_slot_t *slot = NULL;
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
-        if (!s_clients[i].active) { slot = &s_clients[i]; break; }
+        if (!s_clients[i].in_use) { slot = &s_clients[i]; break; }
     }
     // Kein freier Slot: spawn_client uebernimmt den Socket selbst (schliesst ihn),
     // damit der Aufrufer NICHT doppelt close()t (Double-Close -> lwip-Assert).
     if (!slot) { xSemaphoreGive(s_slots_mtx); close(sock); return false; }
 
     memset(slot, 0, sizeof(*slot));
+    slot->in_use          = true;    // Slot belegt bis close_slot fertig ist
     slot->sock            = sock;
     slot->active          = true;
+    // tx_running BEWUSST schon hier true: so wartet der RX-Task beim Aufraeumen
+    // IMMER auf den TX-Task, auch wenn der Client abbricht, BEVOR der TX-Task
+    // ueberhaupt losgelaufen ist. Sonst gaebe der RX-Task den Slot frei und der
+    // gleich startende TX-Task griffe auf freigegebenen Speicher zu (Crash).
+    slot->tx_running      = true;
     slot->authed          = !s_auth_req;
     slot->connected_at_us = esp_timer_get_time();
     slot->tx              = xStreamBufferCreate(CONFIG_EUL_CLIENT_TX_STREAM_SIZE, 1);
@@ -290,6 +305,8 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     }
     if (xTaskCreate(client_tx_task, "eul-cli-tx", 2048, slot, 10, NULL) != pdPASS) {
         EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer TX-Task", slot->peer);
+        // Kein TX-Task -> RX-Task muss nicht auf ihn warten.
+        slot->tx_running = false;
         // RX-Task laeuft schon und raeumt auf, sobald active=false + Socket zu.
         slot->active = false;
         if (slot->sock >= 0) shutdown(slot->sock, SHUT_RDWR);
