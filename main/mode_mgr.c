@@ -13,7 +13,6 @@
 #include "console_log.h"
 #include "event_log.h"
 #include "telemetry.h"
-#include "mqtt_bridge.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -44,7 +43,7 @@ static void on_uart_rx(const uint8_t *data, size_t len, void *user)
     (void)user;
     usb_cdc_gateway_broadcast(data, len);
     tcp_server_broadcast(data, len);
-    telemetry_feed_rx(data, len);   // ESP3-Parser fuer /api/telegrams + MQTT
+    telemetry_feed_rx(data, len);   // ESP3-Parser fuer /api/telegrams
 }
 
 // -----------------------------------------------------------------------------
@@ -242,28 +241,6 @@ static void run_normal(const eul_config_t *cfg)
     // HTTP-Portal auch im Normalmodus verfuegbar (mit Basic Auth), damit man
     // ohne Factory-Reset umkonfigurieren kann.
     ESP_ERROR_CHECK(http_portal_start(false));
-
-    // MQTT-Bridge (optional): publish empfangene Telegramme, subscribe command,
-    // LWT + optional HA-Autodiscovery.
-    if (cfg->mqtt_enabled) {
-        char topic[EUL_MQTT_TOPIC_MAX + 16];
-        if (cfg->mqtt_topic[0]) snprintf(topic, sizeof(topic), "%s", cfg->mqtt_topic);
-        else                    snprintf(topic, sizeof(topic), "eul22/%s", config_device_suffix());
-
-        mqtt_bridge_cfg_t mc = {
-            .host        = cfg->mqtt_host,
-            .port        = cfg->mqtt_port,
-            .user        = cfg->mqtt_user,
-            .pass        = cfg->mqtt_pass,
-            .base_topic  = topic,
-            .device_name = cfg->device_name,
-            .suffix      = config_device_suffix(),
-            .discovery   = cfg->mqtt_discovery,
-            .disc_prefix = cfg->mqtt_disc_prefix,
-            .retain      = cfg->mqtt_retain,
-        };
-        mqtt_bridge_start(&mc);
-    }
 
     // USB CDC bewusst zuletzt: sobald aktiv, wird esp_log stumm geschaltet.
     if (cfg->usb_enabled) {

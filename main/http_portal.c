@@ -108,14 +108,6 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "tcp_auth_required", cfg.tcp_auth_required);
     cJSON_AddStringToObject(root, "tcp_token",       cfg.tcp_token);
     cJSON_AddBoolToObject(root, "api_enabled",   cfg.api_enabled);
-    cJSON_AddBoolToObject(root, "mqtt_enabled",  cfg.mqtt_enabled);
-    cJSON_AddStringToObject(root, "mqtt_host",   cfg.mqtt_host);
-    cJSON_AddNumberToObject(root, "mqtt_port",   cfg.mqtt_port);
-    cJSON_AddStringToObject(root, "mqtt_user",   cfg.mqtt_user);
-    cJSON_AddStringToObject(root, "mqtt_topic",  cfg.mqtt_topic);
-    cJSON_AddBoolToObject(root, "mqtt_discovery",    cfg.mqtt_discovery);
-    cJSON_AddBoolToObject(root, "mqtt_retain",       cfg.mqtt_retain);
-    cJSON_AddStringToObject(root, "mqtt_disc_prefix", cfg.mqtt_disc_prefix);
     cJSON_AddStringToObject(root, "device_name", cfg.device_name);
     cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
     cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
@@ -124,7 +116,6 @@ static esp_err_t h_state(httpd_req_t *req)
     // das Portal), damit der Nutzer sein gespeichertes Passwort ansehen kann.
     // Im offenen AP-Modus (Erst-Setup) niemals Secrets herausgeben.
     cJSON_AddStringToObject(root, "wifi_pass", s_ap_mode ? "" : cfg.wifi_pass);
-    cJSON_AddStringToObject(root, "mqtt_pass", s_ap_mode ? "" : cfg.mqtt_pass);
     // Admin-Pass nur im AP-Modus einmalig anzeigen. Im STA nur Platzhalter.
     cJSON_AddStringToObject(root, "admin_pass",
                             s_ap_mode ? cfg.admin_pass : "");
@@ -277,30 +268,10 @@ static esp_err_t h_config(httpd_req_t *req)
         (void)config_set_admin_pass(adm_pass->valuestring);
     }
 
-    // REST-API + MQTT. mqtt_pass leer => bisheriges Passwort behalten.
-    const cJSON *api_en   = cJSON_GetObjectItem(j, "api_enabled");
-    const cJSON *mq_en    = cJSON_GetObjectItem(j, "mqtt_enabled");
-    const cJSON *mq_host  = cJSON_GetObjectItem(j, "mqtt_host");
-    const cJSON *mq_port  = cJSON_GetObjectItem(j, "mqtt_port");
-    const cJSON *mq_user  = cJSON_GetObjectItem(j, "mqtt_user");
-    const cJSON *mq_pass  = cJSON_GetObjectItem(j, "mqtt_pass");
-    const cJSON *mq_topic = cJSON_GetObjectItem(j, "mqtt_topic");
-    const cJSON *mq_disc  = cJSON_GetObjectItem(j, "mqtt_discovery");
-    const cJSON *mq_ret   = cJSON_GetObjectItem(j, "mqtt_retain");
-    const cJSON *mq_pref  = cJSON_GetObjectItem(j, "mqtt_disc_prefix");
-    bool mp_set = mq_pass && cJSON_IsString(mq_pass) && mq_pass->valuestring && mq_pass->valuestring[0];
-
+    // REST-API.
+    const cJSON *api_en = cJSON_GetObjectItem(j, "api_enabled");
     esp_err_t ri = config_save_integrations(
-        (api_en   && cJSON_IsBool(api_en))     ? cJSON_IsTrue(api_en) : cur.api_enabled,
-        (mq_en    && cJSON_IsBool(mq_en))      ? cJSON_IsTrue(mq_en)  : cur.mqtt_enabled,
-        (mq_host  && cJSON_IsString(mq_host))  ? mq_host->valuestring : cur.mqtt_host,
-        (mq_port  && cJSON_IsNumber(mq_port))  ? (uint16_t)mq_port->valueint : cur.mqtt_port,
-        (mq_user  && cJSON_IsString(mq_user))  ? mq_user->valuestring : cur.mqtt_user,
-        mp_set                                 ? mq_pass->valuestring : cur.mqtt_pass,
-        (mq_topic && cJSON_IsString(mq_topic)) ? mq_topic->valuestring : cur.mqtt_topic,
-        (mq_disc  && cJSON_IsBool(mq_disc))    ? cJSON_IsTrue(mq_disc) : cur.mqtt_discovery,
-        (mq_ret   && cJSON_IsBool(mq_ret))     ? cJSON_IsTrue(mq_ret)  : cur.mqtt_retain,
-        (mq_pref  && cJSON_IsString(mq_pref))  ? mq_pref->valuestring  : cur.mqtt_disc_prefix);
+        (api_en && cJSON_IsBool(api_en)) ? cJSON_IsTrue(api_en) : cur.api_enabled);
 
     cJSON_Delete(j);
 

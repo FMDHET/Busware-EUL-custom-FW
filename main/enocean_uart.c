@@ -116,7 +116,7 @@ esp_err_t enocean_uart_start(void)
                                  EUL_PIN_TCM_UART_RX,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-    // Stack grosszuegig: der RX-Fanout speist Telemetrie + MQTT (JSON-Bau).
+    // Stack grosszuegig: der RX-Fanout speist Telemetrie (JSON-Bau).
     xTaskCreate(rx_task, "eul-uart-rx", 5120, NULL, 12, NULL);
 
     ESP_LOGI(TAG, "UART %d ready @%d bps (RX=GPIO%d TX=GPIO%d)",

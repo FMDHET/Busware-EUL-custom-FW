@@ -14,12 +14,6 @@
 #define EUL_TCP_TOKEN_LEN      32
 #define EUL_TCP_TOKEN_MAX      (EUL_TCP_TOKEN_LEN + 1)
 
-#define EUL_MQTT_HOST_MAX      64
-#define EUL_MQTT_USER_MAX      48
-#define EUL_MQTT_PASS_MAX      64
-#define EUL_MQTT_TOPIC_MAX     48
-#define EUL_MQTT_PREFIX_MAX    32
-
 #define EUL_DEV_NAME_MAX       40
 #define EUL_ADMIN_USER_MAX     24
 #define EUL_NTP_MAX            64
@@ -40,17 +34,6 @@ typedef struct {
 
     // REST-API (lesen/senden per HTTP, Auth ueber tcp_token)
     bool     api_enabled;
-
-    // MQTT-Client (publish empfangene Telegramme, subscribe command-topic)
-    bool     mqtt_enabled;
-    bool     mqtt_discovery;                  // HA MQTT-Autodiscovery
-    bool     mqtt_retain;                     // State-Messages mit retain
-    uint16_t mqtt_port;
-    char     mqtt_host[EUL_MQTT_HOST_MAX];
-    char     mqtt_user[EUL_MQTT_USER_MAX];
-    char     mqtt_pass[EUL_MQTT_PASS_MAX];
-    char     mqtt_topic[EUL_MQTT_TOPIC_MAX];   // Basis-Topic, z.B. "eul22/xxxxxx"
-    char     mqtt_disc_prefix[EUL_MQTT_PREFIX_MAX]; // HA Discovery-Prefix (homeassistant)
 
     char     wifi_ssid[EUL_WIFI_SSID_MAX];
     char     wifi_pass[EUL_WIFI_PASS_MAX];
@@ -90,17 +73,8 @@ esp_err_t config_save_general(const char *device_name,
                                const char *ntp_server,
                                const char *tz);
 
-// Schreibt REST-API- und MQTT-Einstellungen (nur diese Keys).
-esp_err_t config_save_integrations(bool api_enabled,
-                                    bool mqtt_enabled,
-                                    const char *mqtt_host,
-                                    uint16_t mqtt_port,
-                                    const char *mqtt_user,
-                                    const char *mqtt_pass,
-                                    const char *mqtt_topic,
-                                    bool mqtt_discovery,
-                                    bool mqtt_retain,
-                                    const char *mqtt_disc_prefix);
+// Schreibt die REST-API-Einstellung (nur dieser Key).
+esp_err_t config_save_integrations(bool api_enabled);
 
 // Erzeugt einen frischen TCP-Auth-Token, persistiert nur diesen Key.
 esp_err_t config_regen_tcp_token(char *out, size_t out_size);

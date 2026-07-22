@@ -6,7 +6,7 @@
 // Zentrale Telegramm-Telemetrie: parst die Roh-RX-Bytes vom TCM515 in
 // vollstaendige ESP3-RADIO-Frames, haelt einen Ring der letzten Telegramme
 // (fuer GET /api/telegrams) und ruft optional einen Callback pro Frame
-// (fuer die MQTT-Bridge).
+// (Callback aktuell ungenutzt).
 
 typedef void (*telemetry_frame_cb_t)(const uint8_t *frame, size_t len, void *user);
 
