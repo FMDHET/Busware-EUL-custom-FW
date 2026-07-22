@@ -8,6 +8,7 @@
 #include "console_log.h"
 #include "event_log.h"
 #include "telemetry.h"
+#include "version.h"
 #include "sdkconfig.h"
 
 #include <string.h>
@@ -21,6 +22,7 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "esp_ota_ops.h"
 #include "wifi_sta.h"
 
 #include "mbedtls/base64.h"
@@ -109,6 +111,14 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddStringToObject(root, "tcp_token",       cfg.tcp_token);
     cJSON_AddBoolToObject(root, "api_enabled",   cfg.api_enabled);
     cJSON_AddStringToObject(root, "device_name", cfg.device_name);
+    cJSON_AddStringToObject(root, "fw_version", EUL_FW_VERSION);
+    cJSON_AddNumberToObject(root, "fw_build",   EUL_FW_BUILD);
+    cJSON_AddStringToObject(root, "fw_git",     EUL_FW_GIT);
+    cJSON_AddStringToObject(root, "fw_date",    EUL_FW_DATE);
+    {
+        const esp_partition_t *run = esp_ota_get_running_partition();
+        cJSON_AddStringToObject(root, "fw_part", run ? run->label : "?");
+    }
     cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
     cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
     cJSON_AddStringToObject(root, "tz",          cfg.tz);
@@ -505,6 +515,58 @@ static esp_err_t h_send(httpd_req_t *req)
     return httpd_resp_sendstr(req, w == ESP_OK ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+// POST /api/ota  Body = rohes Firmware-.bin -> in die inaktive OTA-Partition
+// schreiben, als Boot-Partition setzen, neu starten (Basic-Auth).
+static esp_err_t h_ota(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+
+    const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+    if (!part) { httpd_resp_send_500(req); return ESP_FAIL; }
+
+    esp_ota_handle_t ota = 0;
+    if (esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) {
+        httpd_resp_send_500(req); return ESP_FAIL;
+    }
+
+    char *buf = malloc(4096);
+    if (!buf) { esp_ota_abort(ota); httpd_resp_send_500(req); return ESP_FAIL; }
+
+    int remaining = (int)req->content_len;
+    bool ok = true;
+    while (remaining > 0) {
+        int r = httpd_req_recv(req, buf, remaining < 4096 ? remaining : 4096);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;   // langsamer Upload -> weiter warten
+        if (r <= 0) { ok = false; break; }
+        if (esp_ota_write(ota, buf, r) != ESP_OK) { ok = false; break; }
+        remaining -= r;
+    }
+    free(buf);
+
+    if (!ok) {
+        esp_ota_abort(ota);
+        sec_event("ota_fail", "upload abgebrochen (%d B offen)", remaining);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"upload\"}");
+    }
+    if (esp_ota_end(ota) != ESP_OK) {
+        sec_event("ota_fail", "image ungueltig");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ungueltiges Image\"}");
+    }
+    if (esp_ota_set_boot_partition(part) != ESP_OK) {
+        httpd_resp_send_500(req); return ESP_FAIL;
+    }
+    sec_event("ota_ok", "update -> %s, reboot", part->label);
+    EVT_WARN("ota", "Update erfolgreich (%s) - Neustart", part->label);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    schedule_reboot();
+    return ESP_OK;
+}
+
 esp_err_t http_portal_start(bool ap_mode)
 {
     s_ap_mode = ap_mode;
@@ -542,6 +604,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_tel  = { .uri="/api/telegrams", .method=HTTP_GET,  .handler=h_telegrams };
     httpd_uri_t u_snd  = { .uri="/api/send",      .method=HTTP_POST, .handler=h_send };
     httpd_uri_t u_ev   = { .uri="/api/events",    .method=HTTP_GET,  .handler=h_events };
+    httpd_uri_t u_ota  = { .uri="/api/ota",       .method=HTTP_POST, .handler=h_ota };
     // Captive-Portal-Erkennung bekannter Betriebssysteme: alles auf / umleiten
     httpd_uri_t u_gen  = { .uri="/generate_204", .method=HTTP_GET, .handler=h_captive };
     httpd_uri_t u_hs   = { .uri="/hotspot-detect.html", .method=HTTP_GET, .handler=h_captive };
@@ -561,6 +624,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_tel);
     httpd_register_uri_handler(srv, &u_snd);
     httpd_register_uri_handler(srv, &u_ev);
+    httpd_register_uri_handler(srv, &u_ota);
     if (ap_mode) {
         httpd_register_uri_handler(srv, &u_gen);
         httpd_register_uri_handler(srv, &u_hs);

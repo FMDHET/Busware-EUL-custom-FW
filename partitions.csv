@@ -1,5 +1,9 @@
-# Name,   Type, SubType,  Offset,   Size,   Flags
-nvs,      data, nvs,      0x9000,   0x6000,
-phy_init, data, phy,      0xf000,   0x1000,
-factory,  app,  factory,  0x10000,  3M,
-storage,  data, spiffs,   ,         0xF0000,
+# Name,   Type, SubType,  Offset,    Size,     Flags
+# OTA-faehiges Layout (4 MB). nvs bleibt an 0x9000/0x6000, damit bestehende
+# Konfiguration (WLAN etc.) beim Update auf dieses Layout erhalten bleibt.
+nvs,      data, nvs,      0x9000,    0x6000,
+phy_init, data, phy,      0xf000,    0x1000,
+ota_0,    app,  ota_0,    0x10000,   0x180000,
+ota_1,    app,  ota_1,    0x190000,  0x180000,
+otadata,  data, ota,      0x310000,  0x2000,
+storage,  data, spiffs,   0x312000,  0xEE000,

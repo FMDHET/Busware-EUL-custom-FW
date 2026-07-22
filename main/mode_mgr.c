@@ -13,6 +13,7 @@
 #include "console_log.h"
 #include "event_log.h"
 #include "telemetry.h"
+#include "version.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -276,7 +277,8 @@ esp_err_t mode_mgr_start(void)
     console_log_init();
     event_log_init();
     telemetry_init();
-    EVT_INFO("boot", "Busware EUL22 Firmware gestartet");
+    EVT_INFO("boot", "Busware EUL22 v%s build %d (%s) gestartet",
+             EUL_FW_VERSION, EUL_FW_BUILD, EUL_FW_GIT);
 
     // Grund des vorigen Neustarts protokollieren - so ist im Event-Log
     // erkennbar, ob es ein echter Absturz (Panik/Watchdog) war oder nur ein

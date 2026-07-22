@@ -35,4 +35,5 @@ idf_component_register(
         mbedtls
         json
         mdns
+        app_update
 )

@@ -24,6 +24,11 @@ interface State {
     admin_user: string;
     ntp_server: string;
     tz: string;
+    fw_version: string;
+    fw_build: number;
+    fw_git: string;
+    fw_date: string;
+    fw_part: string;
 }
 
 interface Network {
@@ -356,6 +361,11 @@ async function loadState(): Promise<void> {
         byId<HTMLInputElement>('admin_user').value = s.admin_user || 'admin';
         byId<HTMLInputElement>('ntp_server').value = s.ntp_server || 'pool.ntp.org';
         setTz(s.tz);
+        byId('fw_info').textContent =
+            `Version  : ${s.fw_version}  (Build ${s.fw_build})\n` +
+            `Git      : ${s.fw_git}\n` +
+            `Datum    : ${s.fw_date}\n` +
+            `Partition: ${s.fw_part}`;
         const h1 = document.querySelector('header h1');
         if (h1 && s.device_name) h1.textContent = s.device_name;
         renderApiDoc(s.tcp_token, s.api_enabled);
@@ -477,6 +487,44 @@ async function doReboot(): Promise<void> {
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
+}
+
+function doOtaUpload(): void {
+    const input = byId<HTMLInputElement>('ota_file');
+    const file = input.files && input.files[0];
+    if (!file) { say('Bitte zuerst eine .bin-Datei waehlen'); return; }
+    if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Geraet startet danach neu.`)) return;
+
+    const prog = byId('ota_progress');
+    const btn = byId<HTMLButtonElement>('btn-ota');
+    btn.disabled = true;
+
+    // XHR statt fetch, um den Upload-Fortschritt anzuzeigen. Basic-Auth wird vom
+    // Browser (same-origin) automatisch mitgeschickt.
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/ota');
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            prog.textContent = `Upload ${pct}%  (${fmtBytes(e.loaded)} / ${fmtBytes(e.total)})`;
+        }
+    };
+    xhr.onload = () => {
+        btn.disabled = false;
+        if (xhr.status === 200) {
+            prog.textContent = 'Update erfolgreich — Geraet startet neu ...';
+            say('Firmware aktualisiert, Neustart');
+        } else {
+            prog.textContent = `Fehler ${xhr.status}: ${xhr.responseText}`;
+            say('OTA fehlgeschlagen');
+        }
+    };
+    xhr.onerror = () => {
+        btn.disabled = false;
+        prog.textContent = 'Upload-Fehler (Verbindung abgebrochen). Nochmal versuchen.';
+    };
+    prog.textContent = 'Upload startet ...';
+    xhr.send(file);
 }
 
 async function doFactoryReset(): Promise<void> {
@@ -868,6 +916,7 @@ function init(): void {
     byId('btn-regen2').addEventListener('click', doRegenToken);
     byId('btn-save').addEventListener('click', doSave);
     byId('btn-reboot').addEventListener('click', doReboot);
+    byId('btn-ota').addEventListener('click', doOtaUpload);
     byId('btn-factory').addEventListener('click', doFactoryReset);
     byId('btn-clear').addEventListener('click', clearConsole);
     byId('btn-pause').addEventListener('click', togglePause);

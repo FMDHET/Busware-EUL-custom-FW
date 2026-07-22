@@ -14,8 +14,16 @@
 build/
 sdkconfig
 sdkconfig.old
+sdkconfig.busware-eul22
 dependencies.lock
 managed_components/
+
+# PlatformIO-generierte Projekt-CMake (Wurzel)
+/CMakeLists.txt
+
+# Generierte Versions-Header + Build-Counter (siehe scripts/prebuild_version.py)
+main/version.h
+.build_number
 
 # OS
 .DS_Store

@@ -372,6 +372,16 @@ a { color:var(--brand); }
       <select id="tz"></select>
       <div class="hint">Sommer-/Winterzeit wird gemaess Zone automatisch umgestellt.</div>
     </fieldset>
+
+    <fieldset><legend>Firmware</legend>
+      <div id="fw_info" class="mono" style="white-space:pre">-</div>
+      <label>Update einspielen (.bin)</label>
+      <div class="row">
+        <input type="file" id="ota_file" accept=".bin">
+        <button type="button" class="ghost" id="btn-ota">Hochladen &amp; Update</button>
+      </div>
+      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul22/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
+    </fieldset>
   </section>
 
   <!-- ============================================================== WiFi -->
