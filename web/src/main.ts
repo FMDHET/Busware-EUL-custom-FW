@@ -842,6 +842,7 @@ interface Telegram {
     text: string;
     dbm: number | null;
     rep: number; // Repeater-Hops aus dem Status-Byte (0 = direkt/original)
+    raw: number[]; // kompletter ESP3-Frame (Sync..CRC8D) für die Feld-Zerlegung
 }
 
 function toHex(arr: number[]): string {
@@ -877,7 +878,7 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
 
     if (type !== 1) {
         // kein RADIO_ERP1 (z.B. RESPONSE 0x02) - Typ + Rohdaten zeigen
-        return { ms, dir, typ, rorg: '—', sender: '—', data: toHex(data), text: '', dbm: null, rep: 0 };
+        return { ms, dir, typ, rorg: '—', sender: '—', data: toHex(data), text: '', dbm: null, rep: 0, raw: b };
     }
     if (dataLen < 6) return null;
     const rorg = data[0];
@@ -895,8 +896,48 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     }
     return {
         ms, dir, typ, rorg: name, sender: senderStr, data: toHex(payload),
-        text: describeTelegram(rorg, payload, status, senderStr), dbm, rep,
+        text: describeTelegram(rorg, payload, status, senderStr), dbm, rep, raw: b,
     };
+}
+
+// ESP3-Frame feldweise zerlegen (für die aufklappbare Rohframe-Ansicht).
+interface RawField { name: string; hex: string; }
+function hx1(b: number[], i: number): string {
+    return i >= 0 && i < b.length ? b[i].toString(16).padStart(2, '0') : '??';
+}
+function hxRange(b: number[], from: number, to: number): string {
+    return b.slice(from, to).map((x) => x.toString(16).padStart(2, '0')).join(' ') || '—';
+}
+function esp3Fields(b: number[]): RawField[] {
+    const f: RawField[] = [];
+    if (b.length < 6 || b[0] !== 0x55) return f;
+    const dataLen = (b[1] << 8) | b[2];
+    const optLen = b[3];
+    const type = b[4];
+    f.push({ name: 'Sync', hex: hx1(b, 0) });
+    f.push({ name: 'Data Length', hex: hxRange(b, 1, 3) });
+    f.push({ name: 'Opt. Length', hex: hx1(b, 3) });
+    f.push({ name: 'Packet Type', hex: hx1(b, 4) });
+    f.push({ name: 'CRC8H', hex: hx1(b, 5) });
+    const dataStart = 6;
+    const dataEnd = 6 + dataLen;
+    if (type === 1 && dataLen >= 6) {
+        f.push({ name: 'RORG', hex: hx1(b, dataStart) });
+        f.push({ name: 'Data', hex: hxRange(b, dataStart + 1, dataEnd - 5) });
+        f.push({ name: 'Sender-ID', hex: hxRange(b, dataEnd - 5, dataEnd - 1) });
+        f.push({ name: 'Status', hex: hx1(b, dataEnd - 1) });
+        const os = dataEnd;
+        if (optLen >= 1) f.push({ name: 'SubTelNum', hex: hx1(b, os) });
+        if (optLen >= 5) f.push({ name: 'Destination', hex: hxRange(b, os + 1, os + 5) });
+        if (optLen >= 6) f.push({ name: 'dBm', hex: hx1(b, os + 5) });
+        if (optLen >= 7) f.push({ name: 'Security', hex: hx1(b, os + 6) });
+    } else {
+        f.push({ name: 'Data', hex: hxRange(b, dataStart, dataEnd) });
+        if (optLen > 0) f.push({ name: 'Optional', hex: hxRange(b, dataEnd, dataEnd + optLen) });
+    }
+    const crcd = 6 + dataLen + optLen;
+    f.push({ name: 'CRC8D', hex: hx1(b, crcd) });
+    return f;
 }
 
 function renderTelegramRow(t: Telegram): string {
@@ -908,8 +949,10 @@ function renderTelegramRow(t: Telegram): string {
     const repBadge = t.rep > 0
         ? ` <span title="über ${t.rep} Repeater wiederholt" style="color:#c47f00">🔁${t.rep}</span>`
         : '';
+    const search = `${t.sender} ${nm || ''} ${t.rorg} ${t.typ} ${t.text}`.toLowerCase();
+    const bg = t.rep > 0 ? 'background:rgba(196,127,0,0.10);' : '';
     return (
-        '<tr' + (t.rep > 0 ? ' style="background:rgba(196,127,0,0.10)"' : '') + '>' +
+        `<tr class="tel-row" data-frame="${toHex(t.raw)}" data-search="${escapeHtml(search)}" title="Klicken: ESP3-Rohframe feldweise zerlegt" style="cursor:pointer;${bg}">` +
         `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${fmtTelegramTime(t.ms)}</td>` +
         `<td data-label="Ri." style="text-align:center;white-space:nowrap">${t.dir}${repBadge}</td>` +
         `<td data-label="Typ">${escapeHtml(t.typ)}</td>` +
@@ -939,7 +982,50 @@ function renderTelegramLines(lines: ConsoleLine[]): void {
     const body = byId('tel_body');
     if (body.querySelector('.hint')) body.innerHTML = '';
     body.insertAdjacentHTML('afterbegin', rows.reverse().join(''));
-    while (body.children.length > TELE_MAX) body.removeChild(body.lastElementChild!);
+    // Prune: nur Hauptzeilen zaehlen; zugehoerige Detailzeilen mit entfernen.
+    let mains = body.querySelectorAll<HTMLTableRowElement>('tr.tel-row');
+    while (mains.length > TELE_MAX) {
+        const last = mains[mains.length - 1];
+        const nx = last.nextElementSibling;
+        if (nx && nx.classList.contains('tel-detail')) nx.remove();
+        last.remove();
+        mains = body.querySelectorAll<HTMLTableRowElement>('tr.tel-row');
+    }
+    applyTelegramFilter();
+}
+
+const TEL_COLS = 8; // Spaltenzahl der Telegramm-Tabelle (fuer colspan der Detailzeile)
+let telFilter = '';
+
+// Rohframe-Detailzeile bauen: ESP3-Felder als eigene Spalten + Rohhex.
+function buildTelDetail(frameHex: string): HTMLTableRowElement {
+    const bytes = frameHex.trim().split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16));
+    const fields = esp3Fields(bytes);
+    const tr = document.createElement('tr');
+    tr.className = 'tel-detail';
+    if (!fields.length) {
+        tr.innerHTML = `<td colspan="${TEL_COLS}" class="hint">Rohframe nicht verfügbar</td>`;
+        return tr;
+    }
+    const heads = fields.map((f) => `<th>${escapeHtml(f.name)}</th>`).join('');
+    const vals = fields.map((f) => `<td>${escapeHtml(f.hex)}</td>`).join('');
+    tr.innerHTML =
+        `<td colspan="${TEL_COLS}"><div class="rawwrap">` +
+        `<div class="rawhex">${escapeHtml(frameHex)}</div>` +
+        `<table class="rawtbl"><thead><tr>${heads}</tr></thead><tbody><tr>${vals}</tr></tbody></table>` +
+        `</div></td>`;
+    return tr;
+}
+
+// Filter (Absender/Name/RORG/Typ/Bedeutung) auf alle Telegramm-Zeilen anwenden.
+function applyTelegramFilter(): void {
+    const body = byId('tel_body');
+    body.querySelectorAll<HTMLTableRowElement>('tr.tel-row').forEach((r) => {
+        const match = !telFilter || (r.getAttribute('data-search') || '').includes(telFilter);
+        r.style.display = match ? '' : 'none';
+        const nx = r.nextElementSibling as HTMLElement | null;
+        if (nx && nx.classList.contains('tel-detail')) nx.style.display = match ? '' : 'none';
+    });
 }
 
 // -----------------------------------------------------------------------------
@@ -1248,6 +1334,27 @@ function init(): void {
     byId('btn-baseid-write').addEventListener('click', doWriteBaseId);
 
     initDeviceTable();
+
+    // Telegramm-Filter (Absender/Name/RORG/...).
+    const telFilterEl = byId<HTMLInputElement>('tel_filter');
+    telFilterEl.addEventListener('input', () => {
+        telFilter = telFilterEl.value.trim().toLowerCase();
+        applyTelegramFilter();
+    });
+    // Klick auf eine Telegramm-Zeile -> ESP3-Rohframe feldweise ein-/ausklappen.
+    byId('tel_body').addEventListener('click', (e) => {
+        const row = (e.target as HTMLElement).closest('tr.tel-row') as HTMLTableRowElement | null;
+        if (!row) return;
+        const nx = row.nextElementSibling;
+        if (nx && nx.classList.contains('tel-detail')) {
+            nx.remove();
+            return;
+        }
+        const frame = row.getAttribute('data-frame');
+        if (!frame) return;
+        row.after(buildTelDetail(frame));
+    });
+
     wireConsoleKeyboard();
     populateTz();
 

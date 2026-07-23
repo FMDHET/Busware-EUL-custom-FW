@@ -92,6 +92,19 @@ main {
 #tab-geraete > fieldset { flex:1; display:flex; flex-direction:column; min-height:0; }
 #tab-geraete .devwrap { flex:1; min-height:0; overflow:auto; }
 
+/* Sticky-Header: Ueberschriften bleiben beim Scrollen sichtbar (Desktop;
+   im responsiven Modus ist die Kopfzeile ohnehin ausgeblendet). */
+table.responsive thead th { position:sticky; top:0; background:var(--muted); z-index:2; }
+
+/* Telegramm: aufklappbare ESP3-Rohframe-Zerlegung. */
+tr.tel-row:hover > td { background:var(--muted); }
+tr.tel-detail > td { background:var(--muted); padding:8px 10px; }
+.rawwrap { overflow-x:auto; }
+.rawhex { font-family:ui-monospace,monospace; font-size:12px; color:var(--hint); margin-bottom:6px; white-space:nowrap; }
+table.rawtbl { border-collapse:collapse; font-size:12px; }
+table.rawtbl th { position:static; background:var(--bg); border:1px solid var(--border); padding:3px 8px; white-space:nowrap; font-weight:600; }
+table.rawtbl td { border:1px solid var(--border); padding:3px 8px; white-space:nowrap; text-align:center; font-family:ui-monospace,monospace; }
+
 fieldset {
   border:1px solid var(--border);
   border-radius:6px;
@@ -335,6 +348,7 @@ a { color:var(--brand); }
     </fieldset>
 
     <fieldset><legend>Telegramme</legend>
+      <input type="text" id="tel_filter" placeholder="Filter: Absender, Name, RORG, Bedeutung ..." autocomplete="off" style="margin-bottom:8px">
       <div style="max-height:42vh;overflow:auto">
         <table class="responsive">
           <thead>
@@ -345,7 +359,7 @@ a { color:var(--brand); }
           </tbody>
         </table>
       </div>
-      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Ist dem Absender ein Name zugeordnet (Reiter EnOcean), steht er dahinter.</div>
+      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Name hinter dem Absender kommt aus dem Reiter <b>Geräte</b>. Zeile anklicken zeigt den <b>ESP3-Rohframe feldweise</b>.</div>
     </fieldset>
 
     <fieldset><legend>TCM515-Statistik</legend>
