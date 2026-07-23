@@ -4,6 +4,7 @@
 // eingebettet und dann als C-String in main/portal_html.h abgelegt.
 
 import { EEP_CATALOG } from './eep_catalog';
+import { ELTAKO_DEVICES } from './eltako_devices';
 
 // -----------------------------------------------------------------------------
 // Types (spiegeln HTTP-Backend)
@@ -685,9 +686,12 @@ const ESP3_TYPES: Record<number, string> = {
 // gelernt und/oder manuell im Portal zugeordnet; in localStorage persistiert.
 const DEV_EEP_KEY = 'eul_dev_eep';
 const DEV_NAME_KEY = 'eul_dev_name';
+const DEV_MODEL_KEY = 'eul_dev_model';
 let deviceEep: Record<string, string> = loadMap(DEV_EEP_KEY);
 // Absender -> frei vergebener Klartext-Name (erscheint hinter der Absender-ID).
 let deviceName: Record<string, string> = loadMap(DEV_NAME_KEY);
+// Absender -> ausgewähltes Eltako-Modell (setzt das EEP automatisch).
+let deviceModel: Record<string, string> = loadMap(DEV_MODEL_KEY);
 // Alle bisher gesehenen Absender (fuer die Zuordnungs-Tabelle), sender -> rorg.
 const seenSenders = new Map<string, number>();
 
@@ -958,8 +962,23 @@ function eepSelectHtml(sender: string, rorg: number): string {
     return `<select data-sender="${escapeHtml(sender)}" class="dev-eep">${opts.join('')}</select>`;
 }
 
+// Eltako-Geräte passend zur RORG-Klasse des Absenders (F6/A5/D5/...).
+function eltakoOptionsFor(rorg: number): typeof ELTAKO_DEVICES {
+    const cls = RORG_NAMES[rorg];
+    return ELTAKO_DEVICES.filter((d) => !cls || EEP_CATALOG[d.eep]?.cls === cls);
+}
+
+function eltakoSelectHtml(sender: string, rorg: number): string {
+    const cur = deviceModel[sender] || '';
+    const opts = ['<option value="">— (nicht zugeordnet) —</option>'];
+    for (const d of eltakoOptionsFor(rorg)) {
+        opts.push(`<option value="${escapeHtml(d.model)}"${d.model === cur ? ' selected' : ''}>${escapeHtml(d.model + ' — ' + d.desc)}</option>`);
+    }
+    return `<select data-sender="${escapeHtml(sender)}" class="dev-eltako">${opts.join('')}</select>`;
+}
+
 // Inkrementell: nur neue Absender anhaengen, vorhandene Zeilen in-place
-// aktualisieren (EEP-Select bei Auto-Learn). So wird das Namensfeld NIE mitten
+// aktualisieren (Selects bei Auto-Learn). So wird das Namensfeld NIE mitten
 // im Tippen durch ein eintreffendes Telegram ueberschrieben.
 function renderDeviceTable(): void {
     const body = byId('dev_body');
@@ -975,17 +994,19 @@ function renderDeviceTable(): void {
             row.innerHTML =
                 `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(s)}</td>` +
                 `<td data-label="Name"><input type="text" class="dev-name" data-sender="${escapeHtml(s)}" maxlength="31" autocomplete="off" placeholder="z.B. Taster Flur" value="${escapeHtml(deviceName[s] || '')}"></td>` +
-                `<td data-label="EEP-Profil">${eepSelectHtml(s, rorg)}</td>` +
-                `<td data-label="Profil" class="dev-profile">${escapeHtml(deviceEep[s] && EEP_CATALOG[deviceEep[s]] ? EEP_CATALOG[deviceEep[s]].t : '')}</td>`;
+                `<td data-label="Eltako Gerät">${eltakoSelectHtml(s, rorg)}</td>` +
+                `<td data-label="EEP-Profil">${eepSelectHtml(s, rorg)}</td>`;
             body.appendChild(row);
         } else {
-            // Auto-Learn kann das EEP nachtraeglich setzen -> Select angleichen,
-            // aber nicht waehrend der Nutzer es gerade offen hat.
-            const sel = row.querySelector<HTMLSelectElement>('select.dev-eep');
-            if (sel && document.activeElement !== sel && sel.value !== (deviceEep[s] || '')) {
-                sel.value = deviceEep[s] || '';
-                const prof = row.querySelector('.dev-profile');
-                if (prof) prof.textContent = deviceEep[s] && EEP_CATALOG[deviceEep[s]] ? EEP_CATALOG[deviceEep[s]].t : '';
+            // Auto-Learn kann das EEP nachtraeglich setzen -> Selects angleichen,
+            // aber nicht waehrend der Nutzer sie gerade offen hat.
+            const eepSel = row.querySelector<HTMLSelectElement>('select.dev-eep');
+            if (eepSel && document.activeElement !== eepSel && eepSel.value !== (deviceEep[s] || '')) {
+                eepSel.value = deviceEep[s] || '';
+            }
+            const elSel = row.querySelector<HTMLSelectElement>('select.dev-eltako');
+            if (elSel && document.activeElement !== elSel && elSel.value !== (deviceModel[s] || '')) {
+                elSel.value = deviceModel[s] || '';
             }
         }
     }
@@ -994,29 +1015,51 @@ function renderDeviceTable(): void {
 function initDeviceTable(): void {
     const body = byId('dev_body');
     if (!body) return;
-    // EEP-Auswahl (Select) geaendert.
     body.addEventListener('change', (e) => {
-        const sel = e.target as HTMLElement;
-        if (!(sel instanceof HTMLSelectElement) || !sel.classList.contains('dev-eep')) return;
-        const s = sel.getAttribute('data-sender');
+        const t = e.target;
+        if (!(t instanceof HTMLElement)) return;
+        const s = t.getAttribute('data-sender');
         if (!s) return;
-        if (sel.value) deviceEep[s] = sel.value;
-        else delete deviceEep[s];
-        saveDeviceEep();
-        const row = sel.closest('tr');
-        const prof = row?.querySelector('.dev-profile');
-        if (prof) prof.textContent = sel.value && EEP_CATALOG[sel.value] ? EEP_CATALOG[sel.value].t : '';
-    });
-    // Name eingetragen (beim Verlassen des Feldes speichern).
-    body.addEventListener('change', (e) => {
-        const inp = e.target as HTMLElement;
-        if (!(inp instanceof HTMLInputElement) || !inp.classList.contains('dev-name')) return;
-        const s = inp.getAttribute('data-sender');
-        if (!s) return;
-        const v = inp.value.trim();
-        if (v) deviceName[s] = v;
-        else delete deviceName[s];
-        saveMap(DEV_NAME_KEY, deviceName);
+        const row = t.closest('tr');
+
+        // Eltako-Gerät gewählt -> Modell merken und passendes EEP setzen.
+        if (t instanceof HTMLSelectElement && t.classList.contains('dev-eltako')) {
+            const d = ELTAKO_DEVICES.find((x) => x.model === t.value);
+            if (d) {
+                deviceModel[s] = d.model;
+                deviceEep[s] = d.eep;
+            } else {
+                delete deviceModel[s];
+            }
+            saveMap(DEV_MODEL_KEY, deviceModel);
+            saveDeviceEep();
+            const eepSel = row?.querySelector<HTMLSelectElement>('select.dev-eep');
+            if (eepSel) eepSel.value = deviceEep[s] || '';
+            return;
+        }
+
+        // EEP manuell gewählt -> setzen; passt es nicht zum Modell, Modell lösen.
+        if (t instanceof HTMLSelectElement && t.classList.contains('dev-eep')) {
+            if (t.value) deviceEep[s] = t.value;
+            else delete deviceEep[s];
+            saveDeviceEep();
+            const md = ELTAKO_DEVICES.find((x) => x.model === deviceModel[s]);
+            if (md && md.eep !== t.value) {
+                delete deviceModel[s];
+                saveMap(DEV_MODEL_KEY, deviceModel);
+                const elSel = row?.querySelector<HTMLSelectElement>('select.dev-eltako');
+                if (elSel) elSel.value = '';
+            }
+            return;
+        }
+
+        // Name eingetragen (beim Verlassen des Feldes speichern).
+        if (t instanceof HTMLInputElement && t.classList.contains('dev-name')) {
+            const v = t.value.trim();
+            if (v) deviceName[s] = v;
+            else delete deviceName[s];
+            saveMap(DEV_NAME_KEY, deviceName);
+        }
     });
 }
 
