@@ -136,7 +136,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'api' | 'events' | 'konsole';
+type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'geraete' | 'api' | 'events' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -837,6 +837,7 @@ interface Telegram {
     data: string;
     text: string;
     dbm: number | null;
+    rep: number; // Repeater-Hops aus dem Status-Byte (0 = direkt/original)
 }
 
 function toHex(arr: number[]): string {
@@ -872,7 +873,7 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
 
     if (type !== 1) {
         // kein RADIO_ERP1 (z.B. RESPONSE 0x02) - Typ + Rohdaten zeigen
-        return { ms, dir, typ, rorg: '—', sender: '—', data: toHex(data), text: '', dbm: null };
+        return { ms, dir, typ, rorg: '—', sender: '—', data: toHex(data), text: '', dbm: null, rep: 0 };
     }
     if (dataLen < 6) return null;
     const rorg = data[0];
@@ -880,6 +881,8 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const status = data[dataLen - 1];
     const payload = data.slice(1, dataLen - 5);
     const dbm = optLen >= 6 && opt.length >= 6 ? -opt[5] : null;
+    // EnOcean-Status-Byte: untere 4 Bit = Repeater-Zaehler (0 = nicht wiederholt).
+    const rep = status & 0x0f;
     const rorgHex = `0x${rorg.toString(16).padStart(2, '0')}`;
     const name = RORG_NAMES[rorg] ? `${RORG_NAMES[rorg]} (${rorgHex})` : rorgHex;
     const senderStr = fmtEnoceanId(sender);
@@ -888,7 +891,7 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     }
     return {
         ms, dir, typ, rorg: name, sender: senderStr, data: toHex(payload),
-        text: describeTelegram(rorg, payload, status, senderStr), dbm,
+        text: describeTelegram(rorg, payload, status, senderStr), dbm, rep,
     };
 }
 
@@ -897,10 +900,14 @@ function renderTelegramRow(t: Telegram): string {
     const nm = deviceName[t.sender];
     const senderCell = `<span style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</span>` +
         (nm ? ` <b>${escapeHtml(nm)}</b>` : '');
+    // Wiederholte Telegramme (über Repeater) markieren: 🔁 + Hop-Anzahl.
+    const repBadge = t.rep > 0
+        ? ` <span title="über ${t.rep} Repeater wiederholt" style="color:#c47f00">🔁${t.rep}</span>`
+        : '';
     return (
-        '<tr>' +
+        '<tr' + (t.rep > 0 ? ' style="background:rgba(196,127,0,0.10)"' : '') + '>' +
         `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${fmtTelegramTime(t.ms)}</td>` +
-        `<td data-label="Ri." style="text-align:center">${t.dir}</td>` +
+        `<td data-label="Ri." style="text-align:center;white-space:nowrap">${t.dir}${repBadge}</td>` +
         `<td data-label="Typ">${escapeHtml(t.typ)}</td>` +
         `<td data-label="RORG">${escapeHtml(t.rorg)}</td>` +
         `<td data-label="Absender">${senderCell}</td>` +
@@ -1020,7 +1027,7 @@ async function pollConsole(): Promise<void> {
     // Nur abfragen, wenn eine Ansicht die Daten wirklich braucht - spart der
     // WiFi-Strecke und dem kleinen HTTP-Server des ESP32 unnoetige Requests.
     const tab = activeTabName();
-    if (tab !== 'status' && tab !== 'konsole' && tab !== 'enocean') return;
+    if (tab !== 'status' && tab !== 'konsole' && tab !== 'geraete') return;
     try {
         const j = await api.console(conSeq);
         conSeq = j.last_seq;

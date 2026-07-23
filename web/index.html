@@ -304,6 +304,7 @@ a { color:var(--brand); }
   <button data-tab="wifi">WiFi</button>
   <button data-tab="usb">USB</button>
   <button data-tab="enocean">EnOcean</button>
+  <button data-tab="geraete">Geräte</button>
   <button data-tab="api">API</button>
   <button data-tab="events">Events</button>
   <button data-tab="konsole">Konsole</button>
@@ -427,20 +428,6 @@ a { color:var(--brand); }
       <div class="hint">Achtung: Der TCM515 erlaubt herstellerseitig nur rund <b>10 Schreibvorgänge</b>. Gültiger Bereich: <code>FF800000</code>…<code>FFFFFF80</code>.</div>
     </fieldset>
 
-    <fieldset><legend>Bekannte Geräte</legend>
-      <div style="max-height:50vh;overflow:auto">
-        <table class="responsive">
-          <thead>
-            <tr><th>Absender</th><th>Name</th><th>EEP-Profil</th><th>Profil</th></tr>
-          </thead>
-          <tbody id="dev_body">
-            <tr><td colspan="4" class="hint">noch keine Absender gesehen</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="hint">Jeder empfangene Absender wird hier automatisch eingetragen. <b>Name</b> frei vergeben (erscheint im Status hinter dem Absender). <b>EEP-Profil</b> wird aus A5-Lerntelegrammen automatisch übernommen und bestimmt die „Bedeutung“-Dekodierung; manuell überschreibbar. Alles nur im Browser gespeichert.</div>
-    </fieldset>
-
     <fieldset><legend>TCP-Bridge (Home Assistant / FHEM / ...)</legend>
       <label class="inline"><input type="checkbox" id="tcp_en"> TCP-Server aktivieren</label>
       <label>Port</label>
@@ -459,6 +446,23 @@ a { color:var(--brand); }
         <label>HA-Config (nach Speichern &amp; Neustart einsetzbar)</label>
         <pre id="ha_yaml" class="mono" style="white-space:pre;overflow:auto;font-size:12px;padding:10px"></pre>
       </div>
+    </fieldset>
+  </section>
+
+  <!-- =========================================================== Geraete -->
+  <section class="tab" id="tab-geraete">
+    <fieldset><legend>Bekannte Geräte</legend>
+      <div style="max-height:60vh;overflow:auto">
+        <table class="responsive">
+          <thead>
+            <tr><th>Absender</th><th>Name</th><th>EEP-Profil</th><th>Profil</th></tr>
+          </thead>
+          <tbody id="dev_body">
+            <tr><td colspan="4" class="hint">noch keine Absender gesehen</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint">Jeder empfangene Absender wird hier automatisch eingetragen. <b>Name</b> frei vergeben (erscheint im Status hinter dem Absender). <b>EEP-Profil</b> wird aus A5-Lerntelegrammen automatisch übernommen und bestimmt die „Bedeutung“-Dekodierung; manuell überschreibbar. Alles nur im Browser gespeichert.</div>
     </fieldset>
   </section>
 

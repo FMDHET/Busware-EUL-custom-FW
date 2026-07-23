@@ -43,6 +43,157 @@ RORG_CLASS = {0xF6: "RPS", 0xD5: "1BS", 0xA5: "4BS", 0xD2: "VLD",
 # RealData-Typen, die keine dekodierbaren Nutzfelder sind.
 SKIP_TYPES = {"lrn bit", "rorg", "func", "type", "reserved", "lrn", "learn button"}
 
+# --- Deutsche Uebersetzung (Portal ist deutsch) -----------------------------
+# Feld-Labels (erscheinen in der "Bedeutung"-Spalte). Nicht Gelistetes bleibt
+# englisch (Fallback).
+FIELD_DE = {
+    "Temperature": "Temperatur",
+    "Humidity": "Feuchte",
+    "Supply voltage": "Versorgungsspannung",
+    "Supply Voltage": "Versorgungsspannung",
+    "Supply voltage (OPTIONAL)": "Versorgungsspannung",
+    "Supply voltage (REQUIRED)": "Versorgungsspannung",
+    "Illumination": "Beleuchtungsstärke",
+    "Illumination1": "Beleuchtungsstärke 1",
+    "Illumination2": "Beleuchtungsstärke 2",
+    "Illuminance": "Beleuchtungsstärke",
+    "Set point": "Sollwert",
+    "Set Point": "Sollwert",
+    "Setpoint": "Sollwert",
+    "Basic Setpoint": "Basis-Sollwert",
+    "Relative Setpoint": "Relativer Sollwert",
+    "Temp Setpoint": "Temperatur-Sollwert",
+    "Temperature Set Point": "Temperatur-Sollwert",
+    "Illumination Set Point": "Beleuchtungs-Sollwert",
+    "Humidity Set Point": "Feuchte-Sollwert",
+    "Valve Set point": "Ventil-Sollwert",
+    "Concentration": "Konzentration",
+    "Meter reading": "Zählerstand",
+    "meter reading": "Zählerstand",
+    "CO2": "CO₂",
+    "VOC": "VOC",
+    "Radon": "Radon",
+    "Particles_10": "Feinstaub PM10",
+    "Temperature from RCU": "Temperatur (RCU)",
+    "Dimming Output Level": "Dimmwert",
+    "Dimming value": "Dimmwert",
+    "Blind/shutter pos.": "Behang-/Rollladenposition",
+    "Dawn sensor": "Dämmerungssensor",
+    "Wind speed": "Windgeschwindigkeit",
+    "Average Wind Speed": "Mittlere Windgeschwindigkeit",
+    "Maximum Wind Speed": "Max. Windgeschwindigkeit",
+    "Elevation": "Sonnenhöhe",
+    "Sun Azimuth": "Sonnen-Azimut",
+    "Contact": "Kontakt",
+    "Current Value": "Istwert",
+    "Actual Value": "Istwert",
+    "Actual valve": "Ventil-Iststellung",
+    "Current Position": "Position",
+    "Valve Position": "Ventilposition",
+    "Feed Temperature OR Temperature Set Point": "Vorlauftemperatur / Temp.-Sollwert",
+    "Digital value-input": "Digitaleingang",
+    "Temporary default": "Temporärer Sollwert",
+    "Timeout Setting": "Timeout",
+    "Time": "Zeit",
+    "Ramping time": "Rampenzeit",
+    "Control variable override": "Stellgröße (Override)",
+    "Current": "Strom",
+}
+
+# Titel: geordnete Term-Ersetzung (laengste zuerst). re scannt links->rechts;
+# bei Alternation gewinnt die erste passende Variante an jeder Position und der
+# Scan setzt HINTER dem Treffer fort -> kein Doppel-Uebersetzen.
+TITLE_TERMS = [
+    ("Electronic switches and dimmers with Energy Measurement and Local Control",
+     "Elektronische Schalter und Dimmer mit Energiemessung und lokaler Steuerung"),
+    ("Detectors - Wind Speed Threshold Detector", "Melder – Windgeschwindigkeits-Schwellenmelder"),
+    ("Light Sensor - Curtain Wall Brightness Sensor", "Lichtsensor – Fassaden-Helligkeitssensor"),
+    ("Blinds Control for Position and Angle", "Jalousiesteuerung für Position und Winkel"),
+    ("Automated Meter Reading (AMR)", "Automatische Zählererfassung (AMR)"),
+    ("Battery Powered Actuator", "Batteriebetriebener Stellantrieb"),
+    ("Temperature and Humidity Sensor", "Temperatur- und Feuchtesensor"),
+    ("Light and Blind Control", "Licht- und Jalousiesteuerung"),
+    ("Multisensor Window Handle", "Multisensor-Fenstergriff"),
+    ("People Activit Sensor", "Personen-Aktivitätssensor"),
+    ("Day/Night Control", "Tag-/Nacht-Steuerung"),
+    ("Contacts and Switches", "Kontakte und Schalter"),
+    ("Multi Function Sensors", "Multifunktionssensoren"),
+    ("Environmental Applications", "Umweltanwendungen"),
+    ("LED Controller Status", "LED-Controller-Status"),
+    ("Temperature Sensors", "Temperatursensoren"),
+    ("Temperature Sensor", "Temperatursensor"),
+    ("Room Operating Panel", "Raumbediengerät"),
+    ("Multi-Func Sensor", "Multifunktionssensor"),
+    ("Barometric Sensor", "Barometrischer Sensor"),
+    ("Occupancy Sensor", "Anwesenheitssensor"),
+    ("Controller Status", "Controller-Status"),
+    ("Mechanical Handle", "Mechanischer Griff"),
+    ("Position Switch", "Positionsschalter"),
+    ("Central Command", "Zentralkommando"),
+    ("Channel number", "Kanalnummer"),
+    ("Energy Management", "Energiemanagement"),
+    ("HVAC Components", "HLK-Komponenten"),
+    ("A.C. Curent Clamp", "AC-Stromzange"),
+    ("Power Failure Detection", "Stromausfallerkennung"),
+    ("Fan Speed", "Lüfterstufe"),
+    ("Occupancy", "Anwesenheit"),
+    ("Control", "Steuerung"),
+    ("Digital Input", "Digitaleingang"),
+    ("Standard Valve", "Standardventil"),
+    ("Indoor -Temperature", "Innentemperatur"),
+    ("Application Style", "Applikationsstil"),
+    ("Sun Intensity", "Sonnenintensität"),
+    ("CO2 Sensor", "CO₂-Sensor"),
+    ("Gas Sensor", "Gassensor"),
+    ("Light Sensor", "Lichtsensor"),
+    ("Rocker Switch", "Wippschalter"),
+    ("Push Button", "Drucktaster"),
+    ("Set Point", "Sollwert"),
+    ("Set point", "Sollwert"),
+    ("Supply voltage", "Versorgungsspannung"),
+    ("Illumination", "Beleuchtungsstärke"),
+    ("Temperature", "Temperatur"),
+    ("Humidity", "Feuchte"),
+    ("Electricity", "Strom"),
+    ("Detectors", "Melder"),
+    ("Rocker", "Wippe"),
+    ("Sensor", "Sensor"),
+    ("Range", "Bereich"),
+    ("Light", "Licht"),
+    ("Universal", "Universal"),
+    ("Angle", "Winkel"),
+    ("to", "bis"),
+    ("and", "und"),
+    ("with", "mit"),
+    ("for", "für"),
+]
+
+_TITLE_ALTS = None
+_TITLE_LOOKUP = None
+
+
+def _build_title_re():
+    global _TITLE_ALTS, _TITLE_LOOKUP
+    terms = sorted(TITLE_TERMS, key=lambda t: len(t[0]), reverse=True)
+    _TITLE_LOOKUP = {en: de for en, de in terms}
+    alts = []
+    for en, _ in terms:
+        if re.fullmatch(r"[A-Za-z0-9 ]+", en):
+            alts.append(r"\b" + re.escape(en) + r"\b")
+        else:
+            alts.append(re.escape(en))
+    _TITLE_ALTS = re.compile("|".join(alts))
+
+
+def title_de(title):
+    if _TITLE_ALTS is None:
+        _build_title_re()
+    return _TITLE_ALTS.sub(lambda m: _TITLE_LOOKUP[m.group(0)], title)
+
+
+def field_de(label):
+    return FIELD_DE.get(label, label)
+
 
 def clean(s):
     return re.sub(r"\s+", " ", s or "").strip()
@@ -239,7 +390,7 @@ def main():
             print(f"[eep] skip {eep}: json error {e}", file=sys.stderr)
             continue
         stats["profiles"] += 1
-        entry = {"t": title, "cls": RORG_CLASS.get(rorg or -1, "")}
+        entry = {"t": title_de(title), "cls": RORG_CLASS.get(rorg or -1, "")}
         stats["titles"] += 1
 
         xpath = jpath.replace(".json", "_test.xml")
@@ -256,7 +407,7 @@ def main():
             for (label, sc) in labels:
                 fld = derive_linear(points, label, sc)
                 if fld:
-                    fld["k"] = label
+                    fld["k"] = field_de(label)
                     unit = units.get(norm(label)) or units.get(norm(sc))
                     if unit:
                         fld["u"] = unit
