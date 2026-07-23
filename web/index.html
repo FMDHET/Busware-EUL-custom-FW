@@ -332,14 +332,26 @@ a { color:var(--brand); }
       <div style="max-height:42vh;overflow:auto">
         <table class="responsive">
           <thead>
-            <tr><th>Zeit</th><th>Ri.</th><th>RORG</th><th>Absender</th><th>Daten</th><th>Bedeutung</th><th>dBm</th></tr>
+            <tr><th>Zeit</th><th>Ri.</th><th>Typ</th><th>RORG</th><th>Absender</th><th>Daten</th><th>Bedeutung</th><th>dBm</th></tr>
           </thead>
           <tbody id="tel_body">
-            <tr><td colspan="7" class="hint">warte auf Telegramme...</td></tr>
+            <tr><td colspan="8" class="hint">warte auf Telegramme...</td></tr>
           </tbody>
         </table>
       </div>
       <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet.</div>
+    </fieldset>
+
+    <fieldset><legend>Bekannte Geräte (EEP-Zuordnung)</legend>
+      <table class="responsive">
+        <thead>
+          <tr><th>Absender</th><th>EEP-Profil</th><th>Profil-Name</th></tr>
+        </thead>
+        <tbody id="dev_body">
+          <tr><td colspan="3" class="hint">noch keine Absender gesehen</td></tr>
+        </tbody>
+      </table>
+      <div class="hint">Aus A5-Lerntelegrammen wird das EEP automatisch übernommen. Manuelle Zuordnung bestimmt, wie die Spalte „Bedeutung“ dekodiert wird (nur im Browser gespeichert).</div>
     </fieldset>
 
     <fieldset><legend>TCM515-Statistik</legend>
@@ -416,6 +428,17 @@ a { color:var(--brand); }
 
   <!-- =========================================================== EnOcean -->
   <section class="tab" id="tab-enocean">
+    <fieldset><legend>TCM515 Base-ID</legend>
+      <label>Base-ID <span class="hint">(Format FF-xx-xx-xx)</span></label>
+      <div class="row">
+        <input type="text" id="baseid_in" maxlength="11" autocomplete="off" placeholder="FF-xx-xx-xx" style="font-family:ui-monospace,monospace">
+        <button type="button" class="ghost" id="btn-baseid-read">Lesen</button>
+        <button type="button" class="ghost" id="btn-baseid-write">Schreiben</button>
+      </div>
+      <div id="baseid_info" class="hint">Base-ID des Funkmoduls. Sie ist der Ausgangspunkt der 128 Sender-IDs, die das Gateway selbst senden kann.</div>
+      <div class="hint">Achtung: Der TCM515 erlaubt herstellerseitig nur rund <b>10 Schreibvorgänge</b>. Gültiger Bereich: <code>FF800000</code>…<code>FFFFFF80</code>.</div>
+    </fieldset>
+
     <fieldset><legend>TCP-Bridge (Home Assistant / FHEM / ...)</legend>
       <label class="inline"><input type="checkbox" id="tcp_en"> TCP-Server aktivieren</label>
       <label>Port</label>
@@ -468,7 +491,7 @@ a { color:var(--brand); }
           </tbody>
         </table>
       </div>
-      <div class="hint">Boot, WLAN (Verbindung/Trennung mit Grund), TCP-Clients, MQTT, Security, periodischer Netz-Status. Neueste oben.</div>
+      <div class="hint">Boot, WLAN (Verbindung/Trennung mit Grund), TCP-Clients, Security, periodischer Netz-Status. Neueste oben.</div>
     </fieldset>
   </section>
 

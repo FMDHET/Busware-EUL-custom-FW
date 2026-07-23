@@ -32,3 +32,6 @@ Thumbs.db
 # Web-Toolchain
 web/node_modules/
 web/package-lock.json
+
+# EEP-Rohprofile (Referenz; destilliert in web/src/eep_catalog.ts)
+input/

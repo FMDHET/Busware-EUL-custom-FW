@@ -27,10 +27,28 @@ static uint64_t s_tx_bytes;
 static uint32_t s_rx_frames;
 static uint32_t s_tx_frames;
 
+// Kommando/Antwort-Korrelation: waehrend s_await_resp faengt der Observer den
+// naechsten RESPONSE-Frame (Pakettyp 0x02) ab und signalisiert s_resp_sem.
+#define EUL_RESP_MAX 72
+static SemaphoreHandle_t s_cmd_mutex;   // serialisiert Kommandos
+static SemaphoreHandle_t s_resp_sem;    // Binaer-Semaphor: Antwort da
+static uint8_t           s_resp_frame[EUL_RESP_MAX];
+static size_t            s_resp_len;
+static volatile bool     s_await_resp;
+
 static void observer_on_frame(const uint8_t *frame, size_t len, void *user)
 {
     (void)user;
     s_rx_frames++;
+    // ESP3-Pakettyp steht in frame[4]. 0x02 = RESPONSE (Antwort auf ein
+    // COMMON_COMMAND). Nur abfangen wenn wir gerade auf eine Antwort warten.
+    if (s_await_resp && len >= 7 && frame[4] == 0x02) {
+        size_t n = (len < EUL_RESP_MAX) ? len : EUL_RESP_MAX;
+        memcpy(s_resp_frame, frame, n);
+        s_resp_len   = n;
+        s_await_resp = false;
+        if (s_resp_sem) xSemaphoreGive(s_resp_sem);
+    }
     console_log_frame_tcm(frame, len);
 }
 
@@ -92,6 +110,11 @@ esp_err_t enocean_uart_start(void)
     if (!s_tx_mutex) {
         return ESP_ERR_NO_MEM;
     }
+    s_cmd_mutex = xSemaphoreCreateMutex();
+    s_resp_sem  = xSemaphoreCreateBinary();
+    if (!s_cmd_mutex || !s_resp_sem) {
+        return ESP_ERR_NO_MEM;
+    }
     esp3_parser_init(&s_rx_observer, observer_on_frame, NULL);
 
     ESP_LOGI(TAG, "TCM515 init: NRST=GPIO%d TURBO=GPIO%d BOOT=GPIO%d",
@@ -141,6 +164,53 @@ esp_err_t enocean_uart_write_frame(const uint8_t *frame, size_t len)
         return ESP_OK;
     }
     return ESP_FAIL;
+}
+
+esp_err_t enocean_uart_command(const uint8_t *cmd, size_t cmd_len,
+                               uint8_t *resp, size_t resp_cap, size_t *resp_len,
+                               int timeout_ms)
+{
+    if (!cmd || cmd_len == 0 || cmd_len > 0xFFFF || !resp || resp_cap == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    // ESP3-Frame: 55 | dlenH dlenL optlen(0) type(0x05=COMMON_COMMAND) | CRC8H
+    //             | data[cmd_len] | CRC8D
+    uint8_t frame[6 + 64 + 1];
+    if (cmd_len + 7 > sizeof(frame)) return ESP_ERR_INVALID_SIZE;
+    frame[0] = 0x55;
+    frame[1] = (uint8_t)((cmd_len >> 8) & 0xFF);
+    frame[2] = (uint8_t)(cmd_len & 0xFF);
+    frame[3] = 0x00;              // keine optionalen Daten
+    frame[4] = 0x05;             // COMMON_COMMAND
+    frame[5] = esp3_crc8_buf(&frame[1], 4);
+    memcpy(&frame[6], cmd, cmd_len);
+    frame[6 + cmd_len] = esp3_crc8_buf(cmd, cmd_len);
+    size_t frame_len = 6 + cmd_len + 1;
+
+    if (xSemaphoreTake(s_cmd_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    // Antwort-Abfang scharf schalten und ein evtl. altes Signal wegnehmen.
+    xSemaphoreTake(s_resp_sem, 0);
+    s_resp_len   = 0;
+    s_await_resp = true;
+
+    esp_err_t err = enocean_uart_write_frame(frame, frame_len);
+    if (err != ESP_OK) {
+        s_await_resp = false;
+        xSemaphoreGive(s_cmd_mutex);
+        return err;
+    }
+    if (xSemaphoreTake(s_resp_sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        s_await_resp = false;
+        xSemaphoreGive(s_cmd_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+    size_t n = (s_resp_len < resp_cap) ? s_resp_len : resp_cap;
+    memcpy(resp, s_resp_frame, n);
+    if (resp_len) *resp_len = n;
+    xSemaphoreGive(s_cmd_mutex);
+    return ESP_OK;
 }
 
 void enocean_uart_set_rx_cb(enocean_rx_cb_t cb, void *user)

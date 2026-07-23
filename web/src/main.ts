@@ -3,6 +3,8 @@
 // Wird via esbuild in ein einzelnes IIFE gebundelt, in index.html
 // eingebettet und dann als C-String in main/portal_html.h abgelegt.
 
+import { EEP_CATALOG } from './eep_catalog';
+
 // -----------------------------------------------------------------------------
 // Types (spiegeln HTTP-Backend)
 // -----------------------------------------------------------------------------
@@ -259,7 +261,19 @@ const api = {
     regenToken: (): Promise<{ token: string }> => apiJson('/api/regen-token', { method: 'POST' }),
     factoryReset: (): Promise<{ ok: boolean }> => apiJson('/api/factory-reset', { method: 'POST' }),
     reboot: (): Promise<{ ok: boolean }> => apiJson('/api/reboot', { method: 'POST' }),
+    baseIdRead: (): Promise<BaseIdResp> => apiJson('/api/baseid', { method: 'GET' }),
+    baseIdWrite: (base_id: string): Promise<BaseIdResp> =>
+        apiJson('/api/baseid', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ base_id }),
+        }),
 };
+
+interface BaseIdResp {
+    base_id: string;          // "FF-AA-00-00"
+    writes_remaining?: number; // vom TCM gemeldete Rest-Schreibzugriffe
+}
 
 // Gaengige Zeitzonen: Anzeigename -> POSIX-TZ-String (mit DST-Regel).
 const TZ_ZONES: Array<[string, string]> = [
@@ -368,6 +382,9 @@ async function loadState(): Promise<void> {
             `Partition: ${s.fw_part}`;
         const h1 = document.querySelector('header h1');
         if (h1 && s.device_name) h1.textContent = s.device_name;
+        // Browser-Tab-Titel ebenfalls auf den vergebenen Geraetenamen setzen
+        // (nicht nur die Ueberschrift). Ohne Namen bleibt der statische <title>.
+        if (s.device_name) document.title = s.device_name;
         renderApiDoc(s.tcp_token, s.api_enabled);
         if (!s.tcp_auth_required && s.tcp_enabled) renderHAYaml();
         say(`Modus: ${s.mode} · MAC-Suffix ${s.suffix}`);
@@ -406,6 +423,45 @@ async function doRegenToken(): Promise<void> {
         say('neuer Token');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
+// TCM515 Base-ID lesen (ESP3 CO_RD_IDBASE). Ergebnis in Feld + Anzeige.
+async function doReadBaseId(): Promise<void> {
+    const out = byId('baseid_info');
+    out.textContent = 'lese ...';
+    try {
+        const r = await api.baseIdRead();
+        byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        out.textContent = r.writes_remaining !== undefined
+            ? `Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
+            : `Base-ID: ${r.base_id}`;
+        say('Base-ID gelesen');
+    } catch (e) {
+        out.textContent = `Fehler: ${e instanceof Error ? e.message : String(e)}`;
+    }
+}
+
+// TCM515 Base-ID schreiben (ESP3 CO_WR_IDBASE). Nur ~10 Schreibzugriffe je Modul!
+async function doWriteBaseId(): Promise<void> {
+    const val = byId<HTMLInputElement>('baseid_in').value.trim().toUpperCase();
+    // Gueltiger Bereich laut TCM-Datenblatt: FF800000 .. FFFFFF80.
+    if (!/^FF-?[0-9A-F]{2}-?[0-9A-F]{2}-?[0-9A-F]{2}$/.test(val)) {
+        say('Base-ID-Format: FF-xx-xx-xx (Hex, beginnt mit FF)');
+        return;
+    }
+    if (!confirm('Base-ID wirklich schreiben? Der TCM515 erlaubt nur rund 10 Schreibvorgänge insgesamt.')) return;
+    const out = byId('baseid_info');
+    out.textContent = 'schreibe ...';
+    try {
+        const r = await api.baseIdWrite(val);
+        byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        out.textContent = r.writes_remaining !== undefined
+            ? `Neue Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
+            : `Neue Base-ID: ${r.base_id}`;
+        say('Base-ID geschrieben');
+    } catch (e) {
+        out.textContent = `Fehler: ${e instanceof Error ? e.message : String(e)}`;
     }
 }
 
@@ -618,6 +674,73 @@ const RORG_NAMES: Record<number, string> = {
     0xd1: 'MSC', 0xa6: 'ADT', 0xd4: 'UTE',
 };
 
+// ESP3-Pakettyp (Byte 4 des Frames) -> Anzeigename fuer die Spalte "Typ".
+const ESP3_TYPES: Record<number, string> = {
+    0x01: 'Funk (ERP1)', 0x02: 'Antwort', 0x03: 'Sub-Tel', 0x04: 'Event',
+    0x05: 'Command', 0x06: 'Smart-Ack', 0x07: 'Remote-Man', 0x09: 'Funk (ERP2)',
+    0x0a: '802.15.4', 0x0b: 'Command 2.4',
+};
+
+// Absender (EnOcean-ID) -> EEP-String. Wird aus A5-Lerntelegrammen automatisch
+// gelernt und/oder manuell im Portal zugeordnet; in localStorage persistiert.
+const DEV_EEP_KEY = 'eul_dev_eep';
+let deviceEep: Record<string, string> = loadDeviceEep();
+// Alle bisher gesehenen Absender (fuer die Zuordnungs-Tabelle), sender -> rorg.
+const seenSenders = new Map<string, number>();
+let devTableDirty = false;
+
+function loadDeviceEep(): Record<string, string> {
+    try {
+        const raw = localStorage.getItem(DEV_EEP_KEY);
+        return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveDeviceEep(): void {
+    try {
+        localStorage.setItem(DEV_EEP_KEY, JSON.stringify(deviceEep));
+    } catch {
+        /* localStorage evtl. deaktiviert - dann nur fuer diese Sitzung */
+    }
+}
+
+// w Bits ab globalem Bit-Offset sb (MSB-first) aus dem Payload lesen.
+function extractBits(payload: number[], sb: number, w: number): number | null {
+    let val = 0;
+    for (let i = 0; i < w; i++) {
+        const p = sb + i;
+        const bi = p >> 3;
+        if (bi >= payload.length) return null;
+        val = (val << 1) | ((payload[bi] >> (7 - (p & 7))) & 1);
+    }
+    return val >>> 0;
+}
+
+// Zahl fuer die Anzeige runden (max. 2 Nachkommastellen, keine Nachkomma-Nullen).
+function fmtNum(x: number): string {
+    return (Math.round(x * 100) / 100).toString();
+}
+
+// Datentelegramm anhand eines bekannten EEP dekodieren: liefert die
+// zusammengesetzte "Bedeutung" der linearen Felder oder '' wenn nichts passt.
+function decodeByEep(eep: string, payload: number[]): string {
+    const entry = EEP_CATALOG[eep];
+    if (!entry || !entry.lin) return '';
+    const parts: string[] = [];
+    for (const f of entry.lin) {
+        const raw = extractBits(payload, f.sb, f.w);
+        if (raw === null) continue;
+        const [r0, p0] = f.lo;
+        const [r1, p1] = f.hi;
+        if (r1 === r0) continue;
+        const phys = p0 + ((raw - r0) * (p1 - p0)) / (r1 - r0);
+        parts.push(`${f.k} ${fmtNum(phys)}${f.u ? ' ' + f.u : ''}`);
+    }
+    return parts.join(' · ');
+}
+
 // Wippen-/Tastenbezeichnung fuer RPS (F6-02-xx).
 const RPS_BUTTONS = ['Wippe A unten', 'Wippe A oben', 'Wippe B unten', 'Wippe B oben', 'Taste 5', 'Taste 6', 'Taste 7', 'Taste 8'];
 
@@ -637,8 +760,8 @@ function describe1bs(db0: number): string {
     return db0 & 0x01 ? 'Kontakt geschlossen' : 'Kontakt offen';
 }
 
-// 4BS (RORG A5) als A5-38-08 Zentralkommando (was dieses Gateway schaltet).
-// d = [DB3, DB2, DB1, DB0]; DB0-Bit 0x08 = Datentelegramm (sonst Lernen).
+// 4BS (RORG A5) generischer Fallback: A5-38-08 Zentralkommando (was dieses
+// Gateway schaltet). d = [DB3, DB2, DB1, DB0]; DB0-Bit 0x08 = Datentelegramm.
 function describe4bs(d: number[]): string {
     if (d.length !== 4) return '';
     const db3 = d[0], db2 = d[1], db0 = d[3];
@@ -648,7 +771,43 @@ function describe4bs(d: number[]): string {
     return '';
 }
 
-function describeTelegram(rorg: number, payload: number[], status: number): string {
+function hex2(n: number): string {
+    return n.toString(16).padStart(2, '0').toUpperCase();
+}
+
+// A5-Lerntelegramm mit EEP auswerten: DB0-Bit3 (0x08)=0 -> Lernen,
+// DB0-Bit7 (0x80)=1 -> EEP (FUNC/TYPE) enthalten. Liefert "A5-FF-TT" oder null.
+function eepFromTeachIn4bs(d: number[]): string | null {
+    if (d.length !== 4) return null;
+    const db3 = d[0], db2 = d[1], db0 = d[3];
+    if ((db0 & 0x08) !== 0) return null; // Datentelegramm
+    if ((db0 & 0x80) === 0) return null; // Lernen ohne EEP -> FUNC/TYPE unbekannt
+    const func = db3 >> 2;
+    const type = ((db3 & 0x03) << 5) | (db2 >> 3);
+    return `A5-${hex2(func)}-${hex2(type)}`;
+}
+
+function describeTelegram(rorg: number, payload: number[], status: number, sender: string): string {
+    // A5-Lerntelegramm: EEP ableiten, Absender automatisch zuordnen (Auto-Learn).
+    if (rorg === 0xa5) {
+        const learned = eepFromTeachIn4bs(payload);
+        if (learned) {
+            if (deviceEep[sender] !== learned) {
+                deviceEep[sender] = learned;
+                saveDeviceEep();
+                devTableDirty = true;
+            }
+            const t = EEP_CATALOG[learned]?.t;
+            return `Lerntelegramm ${learned}${t ? ': ' + t : ''}`;
+        }
+    }
+    // Zugeordnetes EEP (gelernt oder manuell) -> Katalog-Dekodierung bevorzugen.
+    const eep = deviceEep[sender];
+    if (eep) {
+        const dec = decodeByEep(eep, payload);
+        if (dec) return dec;
+    }
+    // Fallback: generische, EEP-freie Interpretation.
     if (rorg === 0xf6) return describeRps(payload[0] ?? 0, status);
     if (rorg === 0xd5) return describe1bs(payload[0] ?? 0);
     if (rorg === 0xa5) return describe4bs(payload);
@@ -667,6 +826,7 @@ function fmtTelegramTime(ms: number): string {
 interface Telegram {
     ms: number;
     dir: string;
+    typ: string;
     rorg: string;
     sender: string;
     data: string;
@@ -703,10 +863,11 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const data = b.slice(6, 6 + dataLen);
     const opt = b.slice(6 + dataLen, 6 + dataLen + optLen);
     if (data.length < dataLen) return null;
+    const typ = ESP3_TYPES[type] || `0x${type.toString(16).padStart(2, '0')}`;
 
     if (type !== 1) {
         // kein RADIO_ERP1 (z.B. RESPONSE 0x02) - Typ + Rohdaten zeigen
-        return { ms, dir, rorg: `Typ 0x${type.toString(16).padStart(2, '0')}`, sender: '—', data: toHex(data), text: '', dbm: null };
+        return { ms, dir, typ, rorg: '—', sender: '—', data: toHex(data), text: '', dbm: null };
     }
     if (dataLen < 6) return null;
     const rorg = data[0];
@@ -714,8 +875,17 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const status = data[dataLen - 1];
     const payload = data.slice(1, dataLen - 5);
     const dbm = optLen >= 6 && opt.length >= 6 ? -opt[5] : null;
-    const name = RORG_NAMES[rorg] || `0x${rorg.toString(16).padStart(2, '0')}`;
-    return { ms, dir, rorg: name, sender: fmtEnoceanId(sender), data: toHex(payload), text: describeTelegram(rorg, payload, status), dbm };
+    const rorgHex = `0x${rorg.toString(16).padStart(2, '0')}`;
+    const name = RORG_NAMES[rorg] ? `${RORG_NAMES[rorg]} (${rorgHex})` : rorgHex;
+    const senderStr = fmtEnoceanId(sender);
+    if (!seenSenders.has(senderStr)) {
+        seenSenders.set(senderStr, rorg);
+        devTableDirty = true;
+    }
+    return {
+        ms, dir, typ, rorg: name, sender: senderStr, data: toHex(payload),
+        text: describeTelegram(rorg, payload, status, senderStr), dbm,
+    };
 }
 
 function renderTelegramRow(t: Telegram): string {
@@ -724,6 +894,7 @@ function renderTelegramRow(t: Telegram): string {
         '<tr>' +
         `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${fmtTelegramTime(t.ms)}</td>` +
         `<td data-label="Ri." style="text-align:center">${t.dir}</td>` +
+        `<td data-label="Typ">${escapeHtml(t.typ)}</td>` +
         `<td data-label="RORG">${escapeHtml(t.rorg)}</td>` +
         `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</td>` +
         `<td data-label="Daten" style="font-family:ui-monospace,monospace">${escapeHtml(t.data)}</td>` +
@@ -753,6 +924,58 @@ function renderTelegramLines(lines: ConsoleLine[]): void {
     while (body.children.length > TELE_MAX) body.removeChild(body.lastElementChild!);
 }
 
+// -----------------------------------------------------------------------------
+// Geraete / EEP-Zuordnung: gesehene Absender mit Auswahl des EEP-Profils.
+// Auto-Learn setzt die Zuordnung aus A5-Lerntelegrammen, manuell ueberschreibbar.
+// -----------------------------------------------------------------------------
+function eepOptionsFor(rorg: number): string[] {
+    const cls = RORG_NAMES[rorg];
+    return Object.keys(EEP_CATALOG)
+        .filter((k) => !cls || EEP_CATALOG[k].cls === cls)
+        .sort();
+}
+
+function renderDeviceTable(): void {
+    if (!devTableDirty) return;
+    devTableDirty = false;
+    const body = byId('dev_body');
+    if (!body || !seenSenders.size) return;
+    const rows: string[] = [];
+    for (const s of Array.from(seenSenders.keys()).sort()) {
+        const rorg = seenSenders.get(s)!;
+        const cur = deviceEep[s] || '';
+        const opts = ['<option value="">— unbekannt —</option>'];
+        for (const k of eepOptionsFor(rorg)) {
+            opts.push(`<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(k + ' — ' + EEP_CATALOG[k].t)}</option>`);
+        }
+        const title = cur && EEP_CATALOG[cur] ? EEP_CATALOG[cur].t : '';
+        rows.push(
+            '<tr>' +
+            `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(s)}</td>` +
+            `<td data-label="EEP"><select data-sender="${escapeHtml(s)}" class="dev-eep">${opts.join('')}</select></td>` +
+            `<td data-label="Profil">${escapeHtml(title)}</td>` +
+            '</tr>'
+        );
+    }
+    body.innerHTML = rows.join('');
+}
+
+function initDeviceTable(): void {
+    const body = byId('dev_body');
+    if (!body) return;
+    body.addEventListener('change', (e) => {
+        const sel = e.target as HTMLSelectElement;
+        if (!sel.classList || !sel.classList.contains('dev-eep')) return;
+        const s = sel.getAttribute('data-sender');
+        if (!s) return;
+        if (sel.value) deviceEep[s] = sel.value;
+        else delete deviceEep[s];
+        saveDeviceEep();
+        devTableDirty = true;
+        renderDeviceTable();
+    });
+}
+
 let conSeq = 0;
 let conPaused = false;
 
@@ -768,6 +991,7 @@ async function pollConsole(): Promise<void> {
 
         // Telegramm-Tabelle (Status) immer fuellen, unabhaengig von der Pause.
         renderTelegramLines(j.lines);
+        renderDeviceTable();
 
         // Rohe Konsole nur schreiben, wenn nicht pausiert.
         if (conPaused) return;
@@ -922,7 +1146,10 @@ function init(): void {
     byId('btn-pause').addEventListener('click', togglePause);
     byId('btn-copy').addEventListener('click', copyConsole);
     byId('btn-preset-ha').addEventListener('click', applyHAPreset);
+    byId('btn-baseid-read').addEventListener('click', doReadBaseId);
+    byId('btn-baseid-write').addEventListener('click', doWriteBaseId);
 
+    initDeviceTable();
     wireConsoleKeyboard();
     populateTz();
 

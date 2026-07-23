@@ -31,6 +31,9 @@
 static const char *TAG = "eul-http";
 static bool s_ap_mode = false;
 
+// Vorwaerts-Deklaration: Hex-String -> Bytes (Definition weiter unten).
+static size_t parse_hex_str(const char *s, uint8_t *out, size_t outcap);
+
 // -----------------------------------------------------------------------------
 // Basic-Auth-Check (nur im STA-Modus). CRA: kein statisches Default-Passwort,
 // der Wert kommt aus config_store und ist pro Geraet zufaellig.
@@ -104,6 +107,11 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddStringToObject(root, "mode", s_ap_mode ? "provisioning" : "normal");
     cJSON_AddStringToObject(root, "suffix", config_device_suffix());
     cJSON_AddStringToObject(root, "wifi_ssid", cfg.wifi_ssid);
+    cJSON_AddBoolToObject(root, "wifi_static", cfg.wifi_static);
+    cJSON_AddStringToObject(root, "ip_addr",   cfg.ip_addr);
+    cJSON_AddStringToObject(root, "ip_gw",     cfg.ip_gw);
+    cJSON_AddStringToObject(root, "ip_mask",   cfg.ip_mask);
+    cJSON_AddStringToObject(root, "ip_dns",    cfg.ip_dns);
     cJSON_AddBoolToObject(root, "usb_enabled",       cfg.usb_enabled);
     cJSON_AddBoolToObject(root, "tcp_enabled",       cfg.tcp_enabled);
     cJSON_AddNumberToObject(root, "tcp_port",        cfg.tcp_port);
@@ -122,7 +130,7 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddStringToObject(root, "admin_user",  cfg.admin_user);
     cJSON_AddStringToObject(root, "ntp_server",  cfg.ntp_server);
     cJSON_AddStringToObject(root, "tz",          cfg.tz);
-    // WLAN-/MQTT-Passwort nur im STA-Modus ausliefern (dort schuetzt Basic-Auth
+    // WLAN-Passwort nur im STA-Modus ausliefern (dort schuetzt Basic-Auth
     // das Portal), damit der Nutzer sein gespeichertes Passwort ansehen kann.
     // Im offenen AP-Modus (Erst-Setup) niemals Secrets herausgeben.
     cJSON_AddStringToObject(root, "wifi_pass", s_ap_mode ? "" : cfg.wifi_pass);
@@ -283,9 +291,22 @@ static esp_err_t h_config(httpd_req_t *req)
     esp_err_t ri = config_save_integrations(
         (api_en && cJSON_IsBool(api_en)) ? cJSON_IsTrue(api_en) : cur.api_enabled);
 
+    // Feste IP (DHCP vs statisch).
+    const cJSON *ip_st = cJSON_GetObjectItem(j, "wifi_static");
+    const cJSON *ip_a  = cJSON_GetObjectItem(j, "ip_addr");
+    const cJSON *ip_g  = cJSON_GetObjectItem(j, "ip_gw");
+    const cJSON *ip_m  = cJSON_GetObjectItem(j, "ip_mask");
+    const cJSON *ip_d  = cJSON_GetObjectItem(j, "ip_dns");
+    esp_err_t rn = config_save_netip(
+        (ip_st && cJSON_IsBool(ip_st))  ? cJSON_IsTrue(ip_st) : cur.wifi_static,
+        (ip_a && cJSON_IsString(ip_a))  ? ip_a->valuestring : cur.ip_addr,
+        (ip_g && cJSON_IsString(ip_g))  ? ip_g->valuestring : cur.ip_gw,
+        (ip_m && cJSON_IsString(ip_m))  ? ip_m->valuestring : cur.ip_mask,
+        (ip_d && cJSON_IsString(ip_d))  ? ip_d->valuestring : cur.ip_dns);
+
     cJSON_Delete(j);
 
-    if (rm != ESP_OK || ri != ESP_OK || rg != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (rm != ESP_OK || ri != ESP_OK || rg != ESP_OK || rn != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     sec_event("config_change", "applied via portal");
     // Speichern OHNE Neustart - Reboot ist ein eigener Button (/api/reboot).
     httpd_resp_sendstr(req, "{\"ok\":true}");
@@ -416,6 +437,121 @@ static esp_err_t h_events(httpd_req_t *req)
     if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, out, n);
+}
+
+// -----------------------------------------------------------------------------
+// TCM515 Base-ID lesen/schreiben (ESP3 Common Commands CO_RD_IDBASE 0x08 /
+// CO_WR_IDBASE 0x07). Basic-Auth wie die uebrigen Portal-Endpunkte.
+// -----------------------------------------------------------------------------
+// Base-ID aus dem TCM lesen. id_out[4], writes -> Rest-Schreibzyklen (-1 = n/a).
+static esp_err_t baseid_read_raw(uint8_t id_out[4], int *writes_out)
+{
+    const uint8_t cmd = 0x08;               // CO_RD_IDBASE
+    uint8_t resp[72];
+    size_t rlen = 0;
+    esp_err_t e = enocean_uart_command(&cmd, 1, resp, sizeof(resp), &rlen, 600);
+    if (e != ESP_OK) return e;
+    if (rlen < 7) return ESP_FAIL;
+    uint16_t dlen = (uint16_t)((resp[1] << 8) | resp[2]);
+    uint8_t  olen = resp[3];
+    // data = [retcode, baseID(4)]; benoetigt 5 Byte + CRC + Header im Puffer.
+    if (dlen < 5 || (size_t)(6 + dlen) > rlen) return ESP_FAIL;
+    const uint8_t *data = &resp[6];
+    if (data[0] != 0x00) return ESP_FAIL;   // RET_OK erwartet
+    memcpy(id_out, &data[1], 4);
+    if (writes_out) {
+        // Optional Data[0] = verbleibende Schreibzyklen (falls vorhanden).
+        *writes_out = (olen >= 1 && (size_t)(6 + dlen) < rlen) ? resp[6 + dlen] : -1;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t baseid_send_json(httpd_req_t *req, const uint8_t id[4], int writes)
+{
+    char reply[96];
+    if (writes >= 0) {
+        snprintf(reply, sizeof(reply),
+                 "{\"base_id\":\"%02X-%02X-%02X-%02X\",\"writes_remaining\":%d}",
+                 id[0], id[1], id[2], id[3], writes);
+    } else {
+        snprintf(reply, sizeof(reply),
+                 "{\"base_id\":\"%02X-%02X-%02X-%02X\"}",
+                 id[0], id[1], id[2], id[3]);
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, reply);
+}
+
+static esp_err_t baseid_err(httpd_req_t *req, const char *status, const char *msg)
+{
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "application/json");
+    char reply[128];
+    snprintf(reply, sizeof(reply), "{\"error\":\"%s\"}", msg);
+    return httpd_resp_sendstr(req, reply);
+}
+
+// GET /api/baseid -> aktuelle Base-ID
+static esp_err_t h_baseid_read(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+    uint8_t id[4];
+    int writes = -1;
+    if (baseid_read_raw(id, &writes) != ESP_OK) {
+        return baseid_err(req, "504 Gateway Timeout", "TCM515 antwortet nicht");
+    }
+    return baseid_send_json(req, id, writes);
+}
+
+// POST /api/baseid  Body {"base_id":"FF-xx-xx-xx"} -> Base-ID schreiben
+static esp_err_t h_baseid_write(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+
+    char *body = read_body(req);
+    if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
+    cJSON *j = cJSON_Parse(body);
+    free(body);
+    if (!j) return baseid_err(req, "400 Bad Request", "bad json");
+
+    const cJSON *bid = cJSON_GetObjectItem(j, "base_id");
+    uint8_t id[4];
+    size_t n = 0;
+    if (bid && cJSON_IsString(bid) && bid->valuestring) {
+        n = parse_hex_str(bid->valuestring, id, sizeof(id));
+    }
+    cJSON_Delete(j);
+    if (n != 4) return baseid_err(req, "400 Bad Request", "base_id Format FF-xx-xx-xx");
+
+    // Gueltiger Bereich laut TCM-Datenblatt: FF800000 .. FFFFFF80.
+    uint32_t v = ((uint32_t)id[0] << 24) | ((uint32_t)id[1] << 16) |
+                 ((uint32_t)id[2] << 8) | id[3];
+    if (v < 0xFF800000u || v > 0xFFFFFF80u) {
+        return baseid_err(req, "400 Bad Request", "Base-ID ausserhalb FF800000..FFFFFF80");
+    }
+
+    uint8_t cmd[5] = { 0x07, id[0], id[1], id[2], id[3] };   // CO_WR_IDBASE
+    uint8_t resp[72];
+    size_t rlen = 0;
+    esp_err_t e = enocean_uart_command(cmd, sizeof(cmd), resp, sizeof(resp), &rlen, 600);
+    if (e != ESP_OK || rlen < 7) {
+        return baseid_err(req, "504 Gateway Timeout", "TCM515 antwortet nicht");
+    }
+    // data[0] = retcode: 0x00 OK, 0x02 NOT_SUPPORTED, 0x05 baseID range/zaehler.
+    if (resp[6] != 0x00) {
+        return baseid_err(req, "409 Conflict",
+                          "Schreiben abgelehnt (Zyklen aufgebraucht oder ungueltig)");
+    }
+    sec_event("baseid_write", "neue Base-ID %02X%02X%02X%02X", id[0], id[1], id[2], id[3]);
+    EVT_WARN("enocean", "Base-ID geschrieben: %02X-%02X-%02X-%02X", id[0], id[1], id[2], id[3]);
+
+    // Zur Bestaetigung zurueklesen (liefert auch die Rest-Schreibzyklen).
+    uint8_t rd[4];
+    int writes = -1;
+    if (baseid_read_raw(rd, &writes) == ESP_OK) {
+        return baseid_send_json(req, rd, writes);
+    }
+    return baseid_send_json(req, id, -1);
 }
 
 // -----------------------------------------------------------------------------
@@ -605,6 +741,8 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_snd  = { .uri="/api/send",      .method=HTTP_POST, .handler=h_send };
     httpd_uri_t u_ev   = { .uri="/api/events",    .method=HTTP_GET,  .handler=h_events };
     httpd_uri_t u_ota  = { .uri="/api/ota",       .method=HTTP_POST, .handler=h_ota };
+    httpd_uri_t u_bidr = { .uri="/api/baseid",    .method=HTTP_GET,  .handler=h_baseid_read };
+    httpd_uri_t u_bidw = { .uri="/api/baseid",    .method=HTTP_POST, .handler=h_baseid_write };
     // Captive-Portal-Erkennung bekannter Betriebssysteme: alles auf / umleiten
     httpd_uri_t u_gen  = { .uri="/generate_204", .method=HTTP_GET, .handler=h_captive };
     httpd_uri_t u_hs   = { .uri="/hotspot-detect.html", .method=HTTP_GET, .handler=h_captive };
@@ -625,6 +763,8 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_snd);
     httpd_register_uri_handler(srv, &u_ev);
     httpd_register_uri_handler(srv, &u_ota);
+    httpd_register_uri_handler(srv, &u_bidr);
+    httpd_register_uri_handler(srv, &u_bidw);
     if (ap_mode) {
         httpd_register_uri_handler(srv, &u_gen);
         httpd_register_uri_handler(srv, &u_hs);
