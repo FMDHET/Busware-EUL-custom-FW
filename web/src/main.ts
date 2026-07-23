@@ -953,10 +953,21 @@ function eepOptionsFor(rorg: number): string[] {
         .sort();
 }
 
+// RORG-Klasse (RPS/1BS/4BS/VLD) direkt aus dem EEP-String - unabhängig davon,
+// ob das EEP im Katalog vorkommt (einige Eltako-EEPs sind nicht dekodierbar).
+function eepClass(eep: string): string {
+    return RORG_NAMES[parseInt(eep.slice(0, 2), 16)] || '';
+}
+
 function eepSelectHtml(sender: string, rorg: number): string {
     const cur = deviceEep[sender] || '';
+    const keys = eepOptionsFor(rorg);
     const opts = ['<option value="">— unbekannt —</option>'];
-    for (const k of eepOptionsFor(rorg)) {
+    // Zugeordnetes EEP ohne Katalog-Profil trotzdem anzeigen (Konsistenz).
+    if (cur && !keys.includes(cur)) {
+        opts.push(`<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} — (kein Profil im Katalog)</option>`);
+    }
+    for (const k of keys) {
         opts.push(`<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(k + ' — ' + EEP_CATALOG[k].t)}</option>`);
     }
     return `<select data-sender="${escapeHtml(sender)}" class="dev-eep">${opts.join('')}</select>`;
@@ -965,14 +976,14 @@ function eepSelectHtml(sender: string, rorg: number): string {
 // Eltako-Geräte passend zur RORG-Klasse des Absenders (F6/A5/D5/...).
 function eltakoOptionsFor(rorg: number): typeof ELTAKO_DEVICES {
     const cls = RORG_NAMES[rorg];
-    return ELTAKO_DEVICES.filter((d) => !cls || EEP_CATALOG[d.eep]?.cls === cls);
+    return ELTAKO_DEVICES.filter((d) => !cls || eepClass(d.eep) === cls);
 }
 
 function eltakoSelectHtml(sender: string, rorg: number): string {
     const cur = deviceModel[sender] || '';
     const opts = ['<option value="">— (nicht zugeordnet) —</option>'];
     for (const d of eltakoOptionsFor(rorg)) {
-        opts.push(`<option value="${escapeHtml(d.model)}"${d.model === cur ? ' selected' : ''}>${escapeHtml(d.model + ' — ' + d.desc)}</option>`);
+        opts.push(`<option value="${escapeHtml(d.key)}"${d.key === cur ? ' selected' : ''}>${escapeHtml(d.model + ' — ' + d.typ)}</option>`);
     }
     return `<select data-sender="${escapeHtml(sender)}" class="dev-eltako">${opts.join('')}</select>`;
 }
@@ -1024,9 +1035,9 @@ function initDeviceTable(): void {
 
         // Eltako-Gerät gewählt -> Modell merken und passendes EEP setzen.
         if (t instanceof HTMLSelectElement && t.classList.contains('dev-eltako')) {
-            const d = ELTAKO_DEVICES.find((x) => x.model === t.value);
+            const d = ELTAKO_DEVICES.find((x) => x.key === t.value);
             if (d) {
-                deviceModel[s] = d.model;
+                deviceModel[s] = d.key;
                 deviceEep[s] = d.eep;
             } else {
                 delete deviceModel[s];
@@ -1043,7 +1054,7 @@ function initDeviceTable(): void {
             if (t.value) deviceEep[s] = t.value;
             else delete deviceEep[s];
             saveDeviceEep();
-            const md = ELTAKO_DEVICES.find((x) => x.model === deviceModel[s]);
+            const md = ELTAKO_DEVICES.find((x) => x.key === deviceModel[s]);
             if (md && md.eep !== t.value) {
                 delete deviceModel[s];
                 saveMap(DEV_MODEL_KEY, deviceModel);

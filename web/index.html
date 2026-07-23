@@ -87,6 +87,11 @@ main {
 .tab { display:none; }
 .tab.active { display:block; }
 
+/* Geraete-Reiter: Liste nutzt die volle verfuegbare Hoehe. */
+#tab-geraete.tab.active { display:flex; flex-direction:column; min-height:calc(100vh - 170px); }
+#tab-geraete > fieldset { flex:1; display:flex; flex-direction:column; min-height:0; }
+#tab-geraete .devwrap { flex:1; min-height:0; overflow:auto; }
+
 fieldset {
   border:1px solid var(--border);
   border-radius:6px;
@@ -452,7 +457,7 @@ a { color:var(--brand); }
   <!-- =========================================================== Geraete -->
   <section class="tab" id="tab-geraete">
     <fieldset><legend>Bekannte Geräte</legend>
-      <div style="max-height:60vh;overflow:auto">
+      <div class="devwrap">
         <table class="responsive">
           <thead>
             <tr><th>Absender</th><th>Name</th><th>Eltako Gerät</th><th>EEP-Profil</th></tr>
