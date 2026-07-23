@@ -339,19 +339,7 @@ a { color:var(--brand); }
           </tbody>
         </table>
       </div>
-      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet.</div>
-    </fieldset>
-
-    <fieldset><legend>Bekannte Geräte (EEP-Zuordnung)</legend>
-      <table class="responsive">
-        <thead>
-          <tr><th>Absender</th><th>EEP-Profil</th><th>Profil-Name</th></tr>
-        </thead>
-        <tbody id="dev_body">
-          <tr><td colspan="3" class="hint">noch keine Absender gesehen</td></tr>
-        </tbody>
-      </table>
-      <div class="hint">Aus A5-Lerntelegrammen wird das EEP automatisch übernommen. Manuelle Zuordnung bestimmt, wie die Spalte „Bedeutung“ dekodiert wird (nur im Browser gespeichert).</div>
+      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Ist dem Absender ein Name zugeordnet (Reiter EnOcean), steht er dahinter.</div>
     </fieldset>
 
     <fieldset><legend>TCM515-Statistik</legend>
@@ -437,6 +425,20 @@ a { color:var(--brand); }
       </div>
       <div id="baseid_info" class="hint">Base-ID des Funkmoduls. Sie ist der Ausgangspunkt der 128 Sender-IDs, die das Gateway selbst senden kann.</div>
       <div class="hint">Achtung: Der TCM515 erlaubt herstellerseitig nur rund <b>10 Schreibvorgänge</b>. Gültiger Bereich: <code>FF800000</code>…<code>FFFFFF80</code>.</div>
+    </fieldset>
+
+    <fieldset><legend>Bekannte Geräte</legend>
+      <div style="max-height:50vh;overflow:auto">
+        <table class="responsive">
+          <thead>
+            <tr><th>Absender</th><th>Name</th><th>EEP-Profil</th><th>Profil</th></tr>
+          </thead>
+          <tbody id="dev_body">
+            <tr><td colspan="4" class="hint">noch keine Absender gesehen</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint">Jeder empfangene Absender wird hier automatisch eingetragen. <b>Name</b> frei vergeben (erscheint im Status hinter dem Absender). <b>EEP-Profil</b> wird aus A5-Lerntelegrammen automatisch übernommen und bestimmt die „Bedeutung“-Dekodierung; manuell überschreibbar. Alles nur im Browser gespeichert.</div>
     </fieldset>
 
     <fieldset><legend>TCP-Bridge (Home Assistant / FHEM / ...)</legend>

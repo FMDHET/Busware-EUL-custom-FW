@@ -684,26 +684,32 @@ const ESP3_TYPES: Record<number, string> = {
 // Absender (EnOcean-ID) -> EEP-String. Wird aus A5-Lerntelegrammen automatisch
 // gelernt und/oder manuell im Portal zugeordnet; in localStorage persistiert.
 const DEV_EEP_KEY = 'eul_dev_eep';
-let deviceEep: Record<string, string> = loadDeviceEep();
+const DEV_NAME_KEY = 'eul_dev_name';
+let deviceEep: Record<string, string> = loadMap(DEV_EEP_KEY);
+// Absender -> frei vergebener Klartext-Name (erscheint hinter der Absender-ID).
+let deviceName: Record<string, string> = loadMap(DEV_NAME_KEY);
 // Alle bisher gesehenen Absender (fuer die Zuordnungs-Tabelle), sender -> rorg.
 const seenSenders = new Map<string, number>();
-let devTableDirty = false;
 
-function loadDeviceEep(): Record<string, string> {
+function loadMap(key: string): Record<string, string> {
     try {
-        const raw = localStorage.getItem(DEV_EEP_KEY);
+        const raw = localStorage.getItem(key);
         return raw ? (JSON.parse(raw) as Record<string, string>) : {};
     } catch {
         return {};
     }
 }
 
-function saveDeviceEep(): void {
+function saveMap(key: string, m: Record<string, string>): void {
     try {
-        localStorage.setItem(DEV_EEP_KEY, JSON.stringify(deviceEep));
+        localStorage.setItem(key, JSON.stringify(m));
     } catch {
         /* localStorage evtl. deaktiviert - dann nur fuer diese Sitzung */
     }
+}
+
+function saveDeviceEep(): void {
+    saveMap(DEV_EEP_KEY, deviceEep);
 }
 
 // w Bits ab globalem Bit-Offset sb (MSB-first) aus dem Payload lesen.
@@ -795,7 +801,6 @@ function describeTelegram(rorg: number, payload: number[], status: number, sende
             if (deviceEep[sender] !== learned) {
                 deviceEep[sender] = learned;
                 saveDeviceEep();
-                devTableDirty = true;
             }
             const t = EEP_CATALOG[learned]?.t;
             return `Lerntelegramm ${learned}${t ? ': ' + t : ''}`;
@@ -880,7 +885,6 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const senderStr = fmtEnoceanId(sender);
     if (!seenSenders.has(senderStr)) {
         seenSenders.set(senderStr, rorg);
-        devTableDirty = true;
     }
     return {
         ms, dir, typ, rorg: name, sender: senderStr, data: toHex(payload),
@@ -890,13 +894,16 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
 
 function renderTelegramRow(t: Telegram): string {
     const dbm = t.dbm === null ? '' : String(t.dbm);
+    const nm = deviceName[t.sender];
+    const senderCell = `<span style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</span>` +
+        (nm ? ` <b>${escapeHtml(nm)}</b>` : '');
     return (
         '<tr>' +
         `<td data-label="Zeit" style="font-family:ui-monospace,monospace">${fmtTelegramTime(t.ms)}</td>` +
         `<td data-label="Ri." style="text-align:center">${t.dir}</td>` +
         `<td data-label="Typ">${escapeHtml(t.typ)}</td>` +
         `<td data-label="RORG">${escapeHtml(t.rorg)}</td>` +
-        `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</td>` +
+        `<td data-label="Absender">${senderCell}</td>` +
         `<td data-label="Daten" style="font-family:ui-monospace,monospace">${escapeHtml(t.data)}</td>` +
         `<td data-label="Bedeutung">${escapeHtml(t.text)}</td>` +
         `<td data-label="dBm" style="text-align:right">${dbm}</td>` +
@@ -935,44 +942,74 @@ function eepOptionsFor(rorg: number): string[] {
         .sort();
 }
 
+function eepSelectHtml(sender: string, rorg: number): string {
+    const cur = deviceEep[sender] || '';
+    const opts = ['<option value="">— unbekannt —</option>'];
+    for (const k of eepOptionsFor(rorg)) {
+        opts.push(`<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(k + ' — ' + EEP_CATALOG[k].t)}</option>`);
+    }
+    return `<select data-sender="${escapeHtml(sender)}" class="dev-eep">${opts.join('')}</select>`;
+}
+
+// Inkrementell: nur neue Absender anhaengen, vorhandene Zeilen in-place
+// aktualisieren (EEP-Select bei Auto-Learn). So wird das Namensfeld NIE mitten
+// im Tippen durch ein eintreffendes Telegram ueberschrieben.
 function renderDeviceTable(): void {
-    if (!devTableDirty) return;
-    devTableDirty = false;
     const body = byId('dev_body');
     if (!body || !seenSenders.size) return;
-    const rows: string[] = [];
-    for (const s of Array.from(seenSenders.keys()).sort()) {
-        const rorg = seenSenders.get(s)!;
-        const cur = deviceEep[s] || '';
-        const opts = ['<option value="">— unbekannt —</option>'];
-        for (const k of eepOptionsFor(rorg)) {
-            opts.push(`<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(k + ' — ' + EEP_CATALOG[k].t)}</option>`);
+    if (body.querySelector('.hint')) body.innerHTML = '';
+
+    // Einfuegereihenfolge (Map) beibehalten -> keine Reflows bestehender Zeilen.
+    for (const [s, rorg] of seenSenders) {
+        let row = body.querySelector<HTMLTableRowElement>(`tr[data-sender="${s}"]`);
+        if (!row) {
+            row = document.createElement('tr');
+            row.setAttribute('data-sender', s);
+            row.innerHTML =
+                `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(s)}</td>` +
+                `<td data-label="Name"><input type="text" class="dev-name" data-sender="${escapeHtml(s)}" maxlength="31" autocomplete="off" placeholder="z.B. Taster Flur" value="${escapeHtml(deviceName[s] || '')}"></td>` +
+                `<td data-label="EEP-Profil">${eepSelectHtml(s, rorg)}</td>` +
+                `<td data-label="Profil" class="dev-profile">${escapeHtml(deviceEep[s] && EEP_CATALOG[deviceEep[s]] ? EEP_CATALOG[deviceEep[s]].t : '')}</td>`;
+            body.appendChild(row);
+        } else {
+            // Auto-Learn kann das EEP nachtraeglich setzen -> Select angleichen,
+            // aber nicht waehrend der Nutzer es gerade offen hat.
+            const sel = row.querySelector<HTMLSelectElement>('select.dev-eep');
+            if (sel && document.activeElement !== sel && sel.value !== (deviceEep[s] || '')) {
+                sel.value = deviceEep[s] || '';
+                const prof = row.querySelector('.dev-profile');
+                if (prof) prof.textContent = deviceEep[s] && EEP_CATALOG[deviceEep[s]] ? EEP_CATALOG[deviceEep[s]].t : '';
+            }
         }
-        const title = cur && EEP_CATALOG[cur] ? EEP_CATALOG[cur].t : '';
-        rows.push(
-            '<tr>' +
-            `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(s)}</td>` +
-            `<td data-label="EEP"><select data-sender="${escapeHtml(s)}" class="dev-eep">${opts.join('')}</select></td>` +
-            `<td data-label="Profil">${escapeHtml(title)}</td>` +
-            '</tr>'
-        );
     }
-    body.innerHTML = rows.join('');
 }
 
 function initDeviceTable(): void {
     const body = byId('dev_body');
     if (!body) return;
+    // EEP-Auswahl (Select) geaendert.
     body.addEventListener('change', (e) => {
-        const sel = e.target as HTMLSelectElement;
-        if (!sel.classList || !sel.classList.contains('dev-eep')) return;
+        const sel = e.target as HTMLElement;
+        if (!(sel instanceof HTMLSelectElement) || !sel.classList.contains('dev-eep')) return;
         const s = sel.getAttribute('data-sender');
         if (!s) return;
         if (sel.value) deviceEep[s] = sel.value;
         else delete deviceEep[s];
         saveDeviceEep();
-        devTableDirty = true;
-        renderDeviceTable();
+        const row = sel.closest('tr');
+        const prof = row?.querySelector('.dev-profile');
+        if (prof) prof.textContent = sel.value && EEP_CATALOG[sel.value] ? EEP_CATALOG[sel.value].t : '';
+    });
+    // Name eingetragen (beim Verlassen des Feldes speichern).
+    body.addEventListener('change', (e) => {
+        const inp = e.target as HTMLElement;
+        if (!(inp instanceof HTMLInputElement) || !inp.classList.contains('dev-name')) return;
+        const s = inp.getAttribute('data-sender');
+        if (!s) return;
+        const v = inp.value.trim();
+        if (v) deviceName[s] = v;
+        else delete deviceName[s];
+        saveMap(DEV_NAME_KEY, deviceName);
     });
 }
 
@@ -983,7 +1020,7 @@ async function pollConsole(): Promise<void> {
     // Nur abfragen, wenn eine Ansicht die Daten wirklich braucht - spart der
     // WiFi-Strecke und dem kleinen HTTP-Server des ESP32 unnoetige Requests.
     const tab = activeTabName();
-    if (tab !== 'status' && tab !== 'konsole') return;
+    if (tab !== 'status' && tab !== 'konsole' && tab !== 'enocean') return;
     try {
         const j = await api.console(conSeq);
         conSeq = j.last_seq;
