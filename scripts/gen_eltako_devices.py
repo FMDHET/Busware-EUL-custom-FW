@@ -23,6 +23,12 @@ SHEET = "Sensoren-EEPs"
 
 EEP_RE = re.compile(r"([0-9A-Fa-f]{2}-[0-9A-Fa-f]{2}-[0-9A-Fa-f]{2})")
 
+# Manuelle Ergänzungen, die (noch) nicht im Excel stehen. Bleiben bei jeder
+# Neugenerierung erhalten und sind versioniert. Format: (Modell, Typ, EEP).
+MANUAL_EXTRA = [
+    ("FNSN55EB", "Näherungssensor (NanoPower)", "F6-02-01"),  # bestätigt Eltako-Katalog
+]
+
 
 def clean(v):
     return re.sub(r"\s+", " ", str(v)).strip() if v is not None else ""
@@ -68,6 +74,16 @@ def main():
             continue
         seen.add(key)
         entries.append((model, typ, eep))
+
+    # Manuelle Ergänzungen einmischen (nur wenn nicht ohnehin schon vorhanden).
+    n_extra = 0
+    for model, typ, eep in MANUAL_EXTRA:
+        key = (model, eep, typ)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append((model, typ, eep))
+        n_extra += 1
 
     # Stabil sortieren: nach Modell, dann EEP.
     entries.sort(key=lambda e: (e[0].upper(), e[2]))

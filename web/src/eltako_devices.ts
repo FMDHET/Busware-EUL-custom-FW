@@ -162,6 +162,7 @@ export const ELTAKO_DEVICES: EltakoDevice[] = [
     { key: 'FNS55B|F6-01-01', model: 'FNS55B', typ: 'RPS 1-fach Taster', eep: 'F6-01-01' },
     { key: 'FNS55EB|F6-01-01', model: 'FNS55EB', typ: 'RPS 1-fach Taster', eep: 'F6-01-01' },
     { key: 'FNS65EB|F6-01-01', model: 'FNS65EB', typ: 'RPS 1-fach Taster', eep: 'F6-01-01' },
+    { key: 'FNSN55EB|F6-02-01', model: 'FNSN55EB', typ: 'Näherungssensor (NanoPower)', eep: 'F6-02-01' },
     { key: 'FPE-1|F6-01-01', model: 'FPE-1', typ: 'RPS 1-fach Taster', eep: 'F6-01-01' },
     { key: 'FRW|F6-02-01', model: 'FRW', typ: 'RPS Rauchmelder', eep: 'F6-02-01' },
     { key: 'FRWB|A5-30-03', model: 'FRWB', typ: 'Wasser/Rauch/Hitze', eep: 'A5-30-03' },
