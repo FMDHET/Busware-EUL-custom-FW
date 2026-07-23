@@ -117,6 +117,11 @@ esp_err_t config_load(eul_config_t *out)
 
     ESP_ERROR_CHECK(read_str(h, "wifi_ssid",  out->wifi_ssid,  sizeof(out->wifi_ssid)));
     ESP_ERROR_CHECK(read_str(h, "wifi_pass",  out->wifi_pass,  sizeof(out->wifi_pass)));
+    ESP_ERROR_CHECK(read_u8(h,  "ip_static", &u8, 0)); out->wifi_static = u8 != 0;
+    ESP_ERROR_CHECK(read_str(h, "ip_addr",    out->ip_addr,    sizeof(out->ip_addr)));
+    ESP_ERROR_CHECK(read_str(h, "ip_gw",      out->ip_gw,      sizeof(out->ip_gw)));
+    ESP_ERROR_CHECK(read_str(h, "ip_mask",    out->ip_mask,    sizeof(out->ip_mask)));
+    ESP_ERROR_CHECK(read_str(h, "ip_dns",     out->ip_dns,     sizeof(out->ip_dns)));
     ESP_ERROR_CHECK(read_str(h, "ap_pass",    out->ap_pass,    sizeof(out->ap_pass)));
     ESP_ERROR_CHECK(read_str(h, "admin_pass", out->admin_pass, sizeof(out->admin_pass)));
     ESP_ERROR_CHECK(read_str(h, "tcp_token",  out->tcp_token,  sizeof(out->tcp_token)));
@@ -185,6 +190,25 @@ esp_err_t config_save_modes(bool usb_enabled,
         sec_event("modes_set", "usb=%d tcp=%d auth=%d port=%u",
                   usb_enabled, tcp_enabled, tcp_auth_required, tcp_port);
     }
+    return r;
+}
+
+esp_err_t config_save_netip(bool wifi_static, const char *ip, const char *gw,
+                            const char *mask, const char *dns)
+{
+    nvs_handle_t h;
+    esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
+    if (r != ESP_OK) return r;
+
+    r  = nvs_set_u8( h, "ip_static", wifi_static ? 1 : 0);
+    if (r == ESP_OK) r = nvs_set_str(h, "ip_addr", ip   ? ip   : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "ip_gw",   gw   ? gw   : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "ip_mask", mask ? mask : "");
+    if (r == ESP_OK) r = nvs_set_str(h, "ip_dns",  dns  ? dns  : "");
+    if (r == ESP_OK) r = nvs_commit(h);
+    nvs_close(h);
+
+    if (r == ESP_OK) sec_event("netip_set", "static=%d ip=%s", wifi_static, ip ? ip : "");
     return r;
 }
 

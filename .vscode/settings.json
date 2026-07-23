@@ -7,5 +7,6 @@
     "C_Cpp.default.intelliSenseMode": "gcc-x64",
     "editor.formatOnSave": false,
     "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true
+    "files.insertFinalNewline": true,
+    "idf.currentSetup": "C:\\Users\\falkt\\esp\\v5.3.1\\esp-idf"
 }

@@ -10,9 +10,13 @@ menu "Busware EUL22 Gateway"
             (https://github.com/FMDHET/home-assistant-eltako).
 
     config EUL_MAX_CLIENTS
-        int "Maximum concurrent TCP clients"
-        default 4
+        int "Maximum concurrent EnOcean TCP clients (Port 5100, nicht HTTP)"
+        default 3
         range 1 8
+        help
+            Obergrenze gleichzeitiger Verbindungen zur EnOcean-TCP-Bridge.
+            Das HTTP-Portal (Port 80) hat einen eigenen Socket-Pool und ist
+            NICHT betroffen. 3 = 1x Home Assistant + Reserve.
 
     config EUL_CLIENT_TX_STREAM_SIZE
         int "Per-client outgoing stream buffer (bytes)"

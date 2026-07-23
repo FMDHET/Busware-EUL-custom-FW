@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Struktuierter Event-Ring fuer Debugging (Boot, WiFi, TCP-Clients, MQTT,
+// Struktuierter Event-Ring fuer Debugging (Boot, WiFi, TCP-Clients,
 // Security, Config). Zusaetzlich zur Web-Konsole (Rohbytes) - hier stehen
 // benannte Ereignisse mit Level/Tag/Uhrzeit. Wird auch auf ESP_LOG gespiegelt.
 

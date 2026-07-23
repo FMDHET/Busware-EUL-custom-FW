@@ -27,7 +27,7 @@ typedef struct {
     uint16_t tcp_port;
 
     // Allgemein
-    char     device_name[EUL_DEV_NAME_MAX];  // Anzeigename (Portal, MQTT/HA, mDNS)
+    char     device_name[EUL_DEV_NAME_MAX];  // Anzeigename (Portal, HA, mDNS)
     char     admin_user[EUL_ADMIN_USER_MAX]; // Portal-Login-Benutzer (Default admin)
     char     ntp_server[EUL_NTP_MAX];        // SNTP-Server (Default pool.ntp.org)
     char     tz[EUL_TZ_MAX];                 // POSIX-TZ-String (Default Europe/Berlin)
@@ -37,6 +37,13 @@ typedef struct {
 
     char     wifi_ssid[EUL_WIFI_SSID_MAX];
     char     wifi_pass[EUL_WIFI_PASS_MAX];
+
+    // Feste IP (optional, statt DHCP)
+    bool     wifi_static;
+    char     ip_addr[16];
+    char     ip_gw[16];
+    char     ip_mask[16];
+    char     ip_dns[16];
 
     // Pro-Geraet Zufallswerte (bei Factory-Init einmal generiert)
     char     ap_pass[EUL_AP_PASS_MAX];       // SoftAP WPA2 Passphrase
@@ -66,6 +73,10 @@ esp_err_t config_save_modes(bool usb_enabled,
                              bool tcp_enabled,
                              bool tcp_auth_required,
                              uint16_t tcp_port);
+
+// Schreibt die feste-IP-Einstellung (nur diese Keys). enabled=false -> DHCP.
+esp_err_t config_save_netip(bool wifi_static, const char *ip, const char *gw,
+                            const char *mask, const char *dns);
 
 // Schreibt Allgemein-Einstellungen (Name, Login-User, NTP-Server, Zeitzone).
 esp_err_t config_save_general(const char *device_name,

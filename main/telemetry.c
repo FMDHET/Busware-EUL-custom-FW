@@ -147,7 +147,7 @@ static void on_frame(const uint8_t *frame, size_t len, void *user)
     void *cbu = s_cb_user;
     xSemaphoreGive(s_mtx);
 
-    if (cb) cb(frame, len, cbu);   // ausserhalb des Locks (MQTT publish)
+    if (cb) cb(frame, len, cbu);   // ausserhalb des Locks aufrufen
 }
 
 void telemetry_init(void)

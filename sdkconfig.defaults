@@ -41,6 +41,14 @@ CONFIG_LWIP_MAX_SOCKETS=20
 CONFIG_LWIP_SO_REUSE=y
 CONFIG_LWIP_TCP_KEEPALIVE=y
 
+# ---- WiFi Roaming (802.11k/v/MBO) -------------------------------------------
+# Damit das FritzBox-Mesh den Client sauber steuern/uebergeben kann (BSS
+# Transition Management). Ohne das ist der ESP fuer das Mesh ein "stummer"
+# Client -> zeitweise L2-unerreichbar hinter Repeatern.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_MBO_SUPPORT=y
+CONFIG_ESP_WIFI_SCAN_CACHE=y
+
 # ---- WiFi Buffer ------------------------------------------------------------
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
@@ -53,7 +61,11 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 
 # ---- App-Defaults -----------------------------------------------------------
 CONFIG_EUL_DEFAULT_TCP_PORT=5100
-CONFIG_EUL_MAX_CLIENTS=8
+# Max. gleichzeitige EnOcean-TCP-Clients (Port 5100). Bewusst auf 3 begrenzt:
+# ein LAN-Gateway braucht real 1 (Home Assistant) + etwas Luft (2. HA-Instanz /
+# Debug-Tool). Betrifft NUR die EnOcean-Bridge - das HTTP-Portal (Port 80) hat
+# seinen eigenen Socket-Pool und bleibt davon unberuehrt.
+CONFIG_EUL_MAX_CLIENTS=3
 CONFIG_EUL_CLIENT_TX_STREAM_SIZE=1024
 CONFIG_EUL_MDNS_HOSTNAME_PREFIX="eul-gateway"
 CONFIG_EUL_AP_SSID_PREFIX="EUL22-Config"

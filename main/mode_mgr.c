@@ -203,7 +203,7 @@ static void net_tick(void *arg)
         static const char ka[] = "EUL22-keepalive";
         sendto(s_ka_sock, ka, sizeof(ka) - 1, 0, (struct sockaddr *)&a, sizeof(a));
     }
-    if (++cnt >= 8) {   // alle ~120s (Tick 15s) Netz-Status ins Event-Log
+    if (++cnt >= 24) {  // alle ~120s (Tick 5s) Netz-Status ins Event-Log
         cnt = 0;
         int rssi = 0;
         esp_wifi_sta_get_rssi(&rssi);
@@ -221,10 +221,29 @@ static void run_normal(const eul_config_t *cfg)
 {
     // Wenn WiFi konfiguriert ist, aufbauen. Kommt nichts hoch -> fallback in
     // Provisioning-Modus.
+    wifi_static_ip_t sip = {
+        .enabled = cfg->wifi_static,
+        .ip   = cfg->ip_addr,
+        .gw   = cfg->ip_gw,
+        .mask = cfg->ip_mask,
+        .dns  = cfg->ip_dns,
+    };
     esp_err_t r = wifi_sta_start_and_wait(cfg->wifi_ssid, cfg->wifi_pass,
-                                          pdMS_TO_TICKS(30000));
-    if (r != ESP_OK) {
-        sec_event("wifi_fallback", "STA connect failed -> provisioning");
+                                          &sip, pdMS_TO_TICKS(45000));
+    // Nur bei EINDEUTIG falschen Zugangsdaten (wiederholter Auth-Fehler, ->
+    // ESP_FAIL) ins Provisioning zurueckfallen. Ein bloss noch nicht
+    // erreichbarer Router (Stromausfall, Router bootet langsamer als das
+    // Gateway -> ESP_ERR_TIMEOUT) darf das LAN-Gateway NICHT in den AP-Modus
+    // kippen lassen, sonst ist es im Netz unsichtbar. Stattdessen geduldig
+    // weiter warten: die STA versucht im Hintergrund mit Backoff weiter und
+    // verbindet, sobald der AP auftaucht.
+    while (r == ESP_ERR_TIMEOUT) {
+        EVT_WARN("wifi", "noch keine Verbindung zu '%s' - versuche weiter (STA aktiv)",
+                 cfg->wifi_ssid);
+        r = wifi_sta_wait_connected(pdMS_TO_TICKS(60000));
+    }
+    if (r != ESP_OK) {   // ESP_FAIL -> Zugangsdaten vermutlich falsch
+        sec_event("wifi_fallback", "STA-Auth fehlgeschlagen -> Provisioning");
         wifi_sta_stop();
         run_provisioning(cfg);
         return;
@@ -258,7 +277,7 @@ static void run_normal(const eul_config_t *cfg)
     const esp_timer_create_args_t net_ta = { .callback = net_tick, .name = "eul-net" };
     esp_timer_handle_t net_th;
     if (esp_timer_create(&net_ta, &net_th) == ESP_OK)
-        esp_timer_start_periodic(net_th, 15ULL * 1000000ULL);
+        esp_timer_start_periodic(net_th, 5ULL * 1000000ULL);   // 5s Keepalive
 }
 
 esp_err_t mode_mgr_start(void)
