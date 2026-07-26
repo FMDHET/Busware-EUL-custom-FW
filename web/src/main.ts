@@ -823,8 +823,10 @@ function decodeByEep(eep: string, payload: number[]): string {
 // Wippen-/Tastenbezeichnung fuer RPS (F6-02-xx).
 const RPS_BUTTONS = ['Wippe A unten', 'Wippe A oben', 'Wippe B unten', 'Wippe B oben', 'Taste 5', 'Taste 6', 'Taste 7', 'Taste 8'];
 
-// RPS (RORG F6): Schalter/Wippe. status-Bit NU (0x20) unterscheidet N-/U-Msg,
-// DB0-Bit EB (0x10) = Energiebogen gedrueckt/losgelassen.
+// RPS (RORG F6): Schalter/Wippe. Status-Bit 5 (0x20) ist T21 und bei
+// PTM-Wippen immer gesetzt; ohne T21 ist die Wippen-Zuordnung nicht belastbar,
+// dann wird nur grob gedeutet. DB0-Bit EB (0x10) = Energiebogen
+// gedrueckt/losgelassen.
 function describeRps(db0: number, status: number): string {
     const eb = (db0 & 0x10) !== 0;
     if ((status & 0x20) === 0) return eb ? 'Taste(n) gedrückt' : 'losgelassen';

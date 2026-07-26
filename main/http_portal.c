@@ -201,10 +201,30 @@ static esp_err_t h_scan(httpd_req_t *req)
     return ESP_OK;
 }
 
+#define EUL_MAX_BODY 4096
+
+// Prueft die Body-Groesse VOR dem Lesen und beantwortet Verstoesse selbst mit
+// 400. Ohne das lieferte ein leerer oder zu grosser Body ein irrefuehrendes 500.
+// Rueckgabe: true = Groesse ok, false = Antwort wurde bereits gesendet.
+static bool body_size_ok(httpd_req_t *req)
+{
+    if (req->content_len == 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "leerer Body");
+        return false;
+    }
+    if (req->content_len > EUL_MAX_BODY) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "Body zu gross (max. 4096 Byte)");
+        return false;
+    }
+    return true;
+}
+
 static char *read_body(httpd_req_t *req)
 {
     size_t total = req->content_len;
-    if (total == 0 || total > 4096) return NULL;
+    if (total == 0 || total > EUL_MAX_BODY) return NULL;
     char *buf = malloc(total + 1);
     if (!buf) return NULL;
     size_t got = 0;
@@ -227,6 +247,7 @@ static void schedule_reboot(void)
 static esp_err_t h_config(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!body_size_ok(req)) return ESP_OK;
     char *body = read_body(req);
     if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
 
@@ -576,6 +597,7 @@ static esp_err_t h_baseid_read(httpd_req_t *req)
 static esp_err_t h_baseid_write(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!body_size_ok(req)) return ESP_OK;
 
     char *body = read_body(req);
     if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -596,7 +618,7 @@ static esp_err_t h_baseid_write(httpd_req_t *req)
     uint32_t v = ((uint32_t)id[0] << 24) | ((uint32_t)id[1] << 16) |
                  ((uint32_t)id[2] << 8) | id[3];
     if (v < 0xFF800000u || v > 0xFFFFFF80u) {
-        return baseid_err(req, "400 Bad Request", "Base-ID ausserhalb FF800000..FFFFFF80");
+        return baseid_err(req, "400 Bad Request", "Base-ID außerhalb FF800000..FFFFFF80");
     }
 
     uint8_t cmd[5] = { 0x07, id[0], id[1], id[2], id[3] };   // CO_WR_IDBASE
@@ -609,7 +631,7 @@ static esp_err_t h_baseid_write(httpd_req_t *req)
     // data[0] = retcode: 0x00 OK, 0x02 NOT_SUPPORTED, 0x05 baseID range/zaehler.
     if (resp[6] != 0x00) {
         return baseid_err(req, "409 Conflict",
-                          "Schreiben abgelehnt (Zyklen aufgebraucht oder ungueltig)");
+                          "Schreiben abgelehnt (Zyklen aufgebraucht oder ungültig)");
     }
     sec_event("baseid_write", "neue Base-ID %02X%02X%02X%02X", id[0], id[1], id[2], id[3]);
     EVT_WARN("enocean", "Base-ID geschrieben: %02X-%02X-%02X-%02X", id[0], id[1], id[2], id[3]);
@@ -716,6 +738,7 @@ static esp_err_t h_send(httpd_req_t *req)
     if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     if (!api_authorized(req, &cfg)) return api_reject(req);
 
+    if (!body_size_ok(req)) return ESP_OK;
     char *body = read_body(req);
     if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
     cJSON *j = cJSON_Parse(body);
@@ -736,6 +759,10 @@ static esp_err_t h_send(httpd_req_t *req)
         return httpd_resp_sendstr(req, "{\"error\":\"hex missing or too short\"}");
     }
     esp_err_t w = enocean_uart_write_frame(frame, nf);
+    // In die Web-Konsole spiegeln, damit ueber die REST-API gesendete Frames
+    // dort genauso sichtbar sind wie die der TCP-Clients - sonst fehlt beim
+    // Debuggen ausgerechnet die eigene Sende-Richtung.
+    if (w == ESP_OK) console_log_frame_from("REST-API", frame, nf);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, w == ESP_OK ? "{\"ok\":true}" : "{\"ok\":false}");
 }
@@ -749,8 +776,17 @@ static esp_err_t h_ota(httpd_req_t *req)
     if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
     if (ota_token_ok(req, &cfg)) {
         sec_event("ota_token_auth", "update via ota token");
-    } else if (!check_basic_auth(req, &cfg)) {
-        return ESP_OK;   // 401 wurde bereits gesendet
+    } else {
+        // Wurde ein Token MITGESCHICKT, war er aber falsch: klare JSON-Antwort
+        // statt einer Basic-Auth-Aufforderung - der Aufrufer ist offensichtlich
+        // ein API-Client und kein Browser.
+        char tok[EUL_TCP_TOKEN_MAX] = {0};
+        get_req_token(req, tok, sizeof(tok));
+        if (tok[0]) {
+            sec_event("ota_token_fail", "falscher OTA-Token");
+            return api_reject(req);
+        }
+        if (!check_basic_auth(req, &cfg)) return ESP_OK;   // 401 bereits gesendet
     }
 
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
@@ -793,10 +829,10 @@ static esp_err_t h_ota(httpd_req_t *req)
         return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"upload\"}");
     }
     if (esp_ota_end(ota) != ESP_OK) {
-        sec_event("ota_fail", "image ungueltig");
+        sec_event("ota_fail", "Image ungültig");
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ungueltiges Image\"}");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ungültiges Image\"}");
     }
     if (esp_ota_set_boot_partition(part) != ESP_OK) {
         httpd_resp_send_500(req); return ESP_FAIL;

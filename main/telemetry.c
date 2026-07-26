@@ -39,6 +39,8 @@ static size_t put_hex(char *o, size_t cap, size_t p,
     return p;
 }
 
+// Diese Texte gehen als "text"-Feld ueber /api/telegrams nach draussen und
+// verwenden daher echte Umlaute (UTF-8, wie das JSON selbst).
 static const char *RPS_BTN[8] = {
     "Wippe A unten", "Wippe A oben", "Wippe B unten", "Wippe B oben",
     "Taste 5", "Taste 6", "Taste 7", "Taste 8"
@@ -53,16 +55,19 @@ static void describe(char *out, size_t cap, uint8_t rorg,
     if (rorg == 0xF6 && pay_len >= 1) {
         uint8_t db0 = pay[0];
         int eb = (db0 & 0x10) != 0;
+        // Status-Bit 5 (0x20) ist T21 - bei PTM-Wippen immer gesetzt. Ist es
+        // NICHT gesetzt, stammt das Telegramm nicht von einem Standard-Taster
+        // und die Wippen-Zuordnung waere geraten; dann nur grob deuten.
         if ((status & 0x20) == 0) {
-            snprintf(out, cap, "%s", eb ? "Taste(n) gedrueckt" : "losgelassen");
+            snprintf(out, cap, "%s", eb ? "Taste(n) gedrückt" : "losgelassen");
         } else if (!eb && db0 == 0x00) {
             snprintf(out, cap, "losgelassen");
         } else if (db0 & 0x01) {
             snprintf(out, cap, "%s %s + %s", RPS_BTN[(db0 >> 5) & 7],
-                     eb ? "gedrueckt" : "losgelassen", RPS_BTN[(db0 >> 1) & 7]);
+                     eb ? "gedrückt" : "losgelassen", RPS_BTN[(db0 >> 1) & 7]);
         } else {
             snprintf(out, cap, "%s %s", RPS_BTN[(db0 >> 5) & 7],
-                     eb ? "gedrueckt" : "losgelassen");
+                     eb ? "gedrückt" : "losgelassen");
         }
     } else if (rorg == 0xD5 && pay_len >= 1) {
         snprintf(out, cap, (pay[0] & 0x01) ? "Kontakt geschlossen" : "Kontakt offen");
