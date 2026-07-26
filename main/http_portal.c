@@ -70,6 +70,36 @@ deny:
     return false;
 }
 
+// CSRF-Schutz fuer zustandsaendernde POSTs. Ein Formular-POST von einer
+// fremden Website ist ein "simple request" ohne Preflight - hat der Browser
+// die Basic-Auth-Credentials fuer diese IP gecacht, wuerde er ihn ausfuehren.
+// Gegenmittel: einen MITGESCHICKTEN Origin-Header gegen den eigenen Host
+// pruefen. curl & Co. senden keinen Origin und bleiben unbehelligt; Browser
+// senden ihn bei Cross-Site-POSTs immer.
+static bool origin_ok(httpd_req_t *req)
+{
+    char origin[128];
+    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+        return true;                 // kein Origin -> kein Browser-Cross-Site
+    }
+    char host[64];
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        return false;                // Origin ohne Host: nicht bewertbar
+    }
+    // Origin ist "scheme://host[:port]" - der Teil hinter "//" muss dem Host
+    // entsprechen, den der Client adressiert hat.
+    const char *sep = strstr(origin, "//");
+    return sep && strcmp(sep + 2, host) == 0;
+}
+
+static esp_err_t csrf_reject(httpd_req_t *req)
+{
+    sec_event("csrf_reject", "POST mit fremdem Origin abgewiesen");
+    httpd_resp_set_status(req, "403 Forbidden");
+    httpd_resp_sendstr(req, "fremder Origin");
+    return ESP_OK;
+}
+
 static bool require_auth(httpd_req_t *req)
 {
     eul_config_t cfg;
@@ -247,6 +277,7 @@ static void schedule_reboot(void)
 static esp_err_t h_config(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     if (!body_size_ok(req)) return ESP_OK;
     char *body = read_body(req);
     if (!body) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -382,6 +413,7 @@ static esp_err_t h_config(httpd_req_t *req)
 static esp_err_t h_regen_token(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     char tok[EUL_TCP_TOKEN_MAX];
     if (config_regen_tcp_token(tok, sizeof(tok)) != ESP_OK) {
         httpd_resp_send_500(req);
@@ -401,6 +433,7 @@ static esp_err_t h_regen_token(httpd_req_t *req)
 static esp_err_t h_regen_ota_token(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     char tok[EUL_TCP_TOKEN_MAX];
     if (config_regen_ota_token(tok, sizeof(tok)) != ESP_OK) {
         httpd_resp_send_500(req);
@@ -415,6 +448,7 @@ static esp_err_t h_regen_ota_token(httpd_req_t *req)
 static esp_err_t h_factory(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     if (config_factory_reset() != ESP_OK) {
         // NVS-Wipe fehlgeschlagen -> NICHT rebooten, sonst kommt das Geraet
         // mit alter Config wieder hoch und der Nutzer wundert sich.
@@ -429,6 +463,7 @@ static esp_err_t h_factory(httpd_req_t *req)
 static esp_err_t h_reboot(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     httpd_resp_sendstr(req, "{\"ok\":true}");
     schedule_reboot();
     return ESP_OK;
@@ -597,6 +632,7 @@ static esp_err_t h_baseid_read(httpd_req_t *req)
 static esp_err_t h_baseid_write(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
     if (!body_size_ok(req)) return ESP_OK;
 
     char *body = read_body(req);

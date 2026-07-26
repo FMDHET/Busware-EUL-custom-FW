@@ -62,5 +62,10 @@ esp_err_t usb_cdc_gateway_start(void)
 void usb_cdc_gateway_broadcast(const uint8_t *data, size_t len)
 {
     if (!s_active || !data || len == 0) return;
-    (void)usb_serial_jtag_write_bytes(data, len, pdMS_TO_TICKS(50));
+    // KEINE Wartezeit: diese Funktion laeuft im UART-RX-Task. Haengt am USB
+    // kein lesender Host (Kabel nur am Netzteil), laeuft der TX-Ring voll und
+    // jedes Warten wuerde den RX-Task blockieren -> der UART-Eingangspuffer
+    // laeuft ueber und EnOcean-Telegramme gehen verloren. Lieber die
+    // USB-Ausgabe verwerfen als den Empfang zu gefaehrden.
+    (void)usb_serial_jtag_write_bytes(data, len, 0);
 }

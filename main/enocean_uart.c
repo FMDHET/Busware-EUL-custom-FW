@@ -129,18 +129,24 @@ esp_err_t enocean_uart_start(void)
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_driver_install(EUL_UART_PORT,
-                                        EUL_UART_RX_BUFFER,
-                                        EUL_UART_TX_BUFFER,
-                                        0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(EUL_UART_PORT, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(EUL_UART_PORT,
-                                 EUL_PIN_TCM_UART_TX,
-                                 EUL_PIN_TCM_UART_RX,
-                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    // Fehler zurueckgeben statt abort(): ein UART-Problem darf keinen
+    // Boot-Loop ausloesen, sonst ist auch das Portal nicht mehr erreichbar.
+    esp_err_t e = uart_driver_install(EUL_UART_PORT, EUL_UART_RX_BUFFER,
+                                      EUL_UART_TX_BUFFER, 0, NULL, 0);
+    if (e == ESP_OK) e = uart_param_config(EUL_UART_PORT, &cfg);
+    if (e == ESP_OK) e = uart_set_pin(EUL_UART_PORT,
+                                      EUL_PIN_TCM_UART_TX, EUL_PIN_TCM_UART_RX,
+                                      UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "UART-Init fehlgeschlagen: %s", esp_err_to_name(e));
+        return e;
+    }
 
     // Stack grosszuegig: der RX-Fanout speist Telemetrie (JSON-Bau).
-    xTaskCreate(rx_task, "eul-uart-rx", 5120, NULL, 12, NULL);
+    if (xTaskCreate(rx_task, "eul-uart-rx", 5120, NULL, 12, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "kein RAM fuer die UART-RX-Task");
+        return ESP_ERR_NO_MEM;
+    }
 
     ESP_LOGI(TAG, "UART %d ready @%d bps (RX=GPIO%d TX=GPIO%d)",
              EUL_UART_PORT, EUL_UART_BAUD,
@@ -148,10 +154,10 @@ esp_err_t enocean_uart_start(void)
     return ESP_OK;
 }
 
-esp_err_t enocean_uart_write_frame(const uint8_t *frame, size_t len)
+// Schreibt ohne Ruecksicht auf ein laufendes Kommando. Nur intern.
+static esp_err_t write_frame_raw(const uint8_t *frame, size_t len)
 {
-    if (!frame || len == 0) return ESP_ERR_INVALID_ARG;
-
+    if (!s_tx_mutex) return ESP_ERR_INVALID_STATE;
     if (xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
@@ -166,6 +172,26 @@ esp_err_t enocean_uart_write_frame(const uint8_t *frame, size_t len)
     return ESP_FAIL;
 }
 
+esp_err_t enocean_uart_write_frame(const uint8_t *frame, size_t len)
+{
+    if (!frame || len == 0) return ESP_ERR_INVALID_ARG;
+    // enocean_uart_start() kann fehlschlagen (kein Abbruch mehr) - dann sind
+    // die Mutexe NULL und xSemaphoreTake liefe in ein configASSERT.
+    if (!s_tx_mutex || !s_cmd_mutex) return ESP_ERR_INVALID_STATE;
+
+    // Waehrend ein Kommando auf seine Antwort wartet, KEINE fremden Frames
+    // rausschicken: der TCM515 wuerde darauf ebenfalls mit einem RESPONSE
+    // antworten, und der Observer kann die beiden nicht unterscheiden (ESP3
+    // korreliert Antworten nicht mit Kommandos). Ohne diese Sperre konnte ein
+    // Telegramm eines TCP-Clients die Base-ID-Abfrage im Portal verfaelschen.
+    if (xSemaphoreTake(s_cmd_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t r = write_frame_raw(frame, len);
+    xSemaphoreGive(s_cmd_mutex);
+    return r;
+}
+
 esp_err_t enocean_uart_command(const uint8_t *cmd, size_t cmd_len,
                                uint8_t *resp, size_t resp_cap, size_t *resp_len,
                                int timeout_ms)
@@ -173,6 +199,7 @@ esp_err_t enocean_uart_command(const uint8_t *cmd, size_t cmd_len,
     if (!cmd || cmd_len == 0 || cmd_len > 0xFFFF || !resp || resp_cap == 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (!s_tx_mutex || !s_cmd_mutex || !s_resp_sem) return ESP_ERR_INVALID_STATE;
     // ESP3-Frame: 55 | dlenH dlenL optlen(0) type(0x05=COMMON_COMMAND) | CRC8H
     //             | data[cmd_len] | CRC8D
     uint8_t frame[6 + 64 + 1];
@@ -195,7 +222,9 @@ esp_err_t enocean_uart_command(const uint8_t *cmd, size_t cmd_len,
     s_resp_len   = 0;
     s_await_resp = true;
 
-    esp_err_t err = enocean_uart_write_frame(frame, frame_len);
+    // write_frame_raw statt enocean_uart_write_frame: wir HALTEN s_cmd_mutex
+    // bereits, der oeffentliche Weg wuerde ihn erneut nehmen -> Deadlock.
+    esp_err_t err = write_frame_raw(frame, frame_len);
     if (err != ESP_OK) {
         s_await_resp = false;
         xSemaphoreGive(s_cmd_mutex);

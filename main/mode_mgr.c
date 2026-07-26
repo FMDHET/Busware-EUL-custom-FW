@@ -151,9 +151,16 @@ static void run_provisioning(const eul_config_t *cfg)
 {
     memcpy(&s_prov_cfg, cfg, sizeof(s_prov_cfg));
 
-    ESP_ERROR_CHECK(wifi_ap_start(cfg->ap_pass));
-    ESP_ERROR_CHECK(captive_dns_start("192.168.4.1"));
-    ESP_ERROR_CHECK(http_portal_start(true));
+    // Kein ESP_ERROR_CHECK: der Provisioning-Modus ist die letzte Instanz, in
+    // der der Nutzer das Geraet erreichen kann. Ein Reboot-Loop hier waere das
+    // schlechtestmoegliche Verhalten - lieber degradiert weiterlaufen (z.B.
+    // AP ohne Captive-DNS) und den Fehler auf der Konsole melden.
+    esp_err_t e = wifi_ap_start(cfg->ap_pass);
+    if (e != ESP_OK) EVT_ERR("wifi", "SoftAP nicht gestartet (%s)", esp_err_to_name(e));
+    e = captive_dns_start("192.168.4.1");
+    if (e != ESP_OK) EVT_ERR("dns", "Captive-DNS nicht gestartet (%s)", esp_err_to_name(e));
+    e = http_portal_start(true);
+    if (e != ESP_OK) EVT_ERR("http", "Portal nicht gestartet (%s)", esp_err_to_name(e));
     xTaskCreate(prov_beacon_task, "eul-prov-beacon", 3072, NULL, 3, NULL);
 }
 
@@ -354,7 +361,12 @@ esp_err_t mode_mgr_start(void)
 
     // TCM515 in JEDEM Modus hochfahren (spart Zeit, wenn Provisioning schnell
     // durchlaeuft) und Broadcast-Callback binden.
-    ESP_ERROR_CHECK(enocean_uart_start());
+    // Auch hier kein Abbruch: ohne TCM515 ist das Geraet zwar nutzlos als
+    // Gateway, aber das Portal muss erreichbar bleiben, damit der Nutzer den
+    // Fehler ueberhaupt sehen und konfigurieren kann.
+    if (enocean_uart_start() != ESP_OK) {
+        EVT_ERR("enocean", "TCM515-UART nicht initialisiert - keine Funkfunktion");
+    }
     enocean_uart_set_rx_cb(on_uart_rx, NULL);
 
     if (!cfg.provisioned) {
