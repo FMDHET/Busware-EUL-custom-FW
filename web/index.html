@@ -160,6 +160,12 @@ button.danger { background:var(--danger); color:#fff; }
 button:disabled { opacity:0.5; cursor:not-allowed; }
 
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.progress { display:none; height:10px; margin-top:10px; border-radius:5px;
+            background:var(--border); overflow:hidden; }
+.progress > div { height:100%; width:0%; background:var(--brand);
+                  border-radius:5px; transition:width .25s ease; }
+.progress.indet > div { width:30% !important; animation:indet 1.2s infinite ease-in-out; }
+@keyframes indet { 0%{margin-left:-30%} 100%{margin-left:100%} }
 .row > * { min-width:0; }
 .row > input, .row > select { flex:1; }
 
@@ -400,7 +406,17 @@ a { color:var(--brand); }
         <input type="file" id="ota_file" accept=".bin">
         <button type="button" class="ghost" id="btn-ota">Hochladen &amp; Update</button>
       </div>
+      <div class="progress" id="ota_bar_wrap"><div id="ota_bar"></div></div>
       <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul22/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
+      <hr>
+      <label>OTA-Token <span class="hint">(erlaubt NUR Firmware-Updates, kein Portal-Zugriff)</span></label>
+      <div class="row">
+        <div id="ota_token" class="secret"></div>
+        <button type="button" class="ghost" id="btn-regen-ota">Neu erzeugen</button>
+      </div>
+      <div class="hint">Damit lassen sich Updates delegieren, ohne das Admin-Passwort weiterzugeben:<br>
+        <code>curl -H "Authorization: Bearer &lt;token&gt;" --data-binary @firmware.bin http://&lt;ip&gt;/api/ota</code><br>
+        &bdquo;Neu erzeugen&ldquo; macht den alten Token sofort ungueltig.</div>
     </fieldset>
   </section>
 

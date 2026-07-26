@@ -33,7 +33,11 @@ static esp_err_t read_str(nvs_handle_t h, const char *key, char *out, size_t out
 {
     size_t len = out_size;
     esp_err_t r = nvs_get_str(h, key, out, &len);
-    if (r == ESP_ERR_NVS_NOT_FOUND) {
+    if (r == ESP_ERR_NVS_NOT_FOUND || r == ESP_ERR_NVS_INVALID_LENGTH) {
+        // NOT_FOUND: Key existiert (noch) nicht. INVALID_LENGTH: gespeicherter
+        // Wert laenger als der Zielpuffer (z.B. nach FW-Wechsel mit kleinerem
+        // Feld). Beides ist recoverable -> leerer Default statt Fehler, sonst
+        // wuerde ein einzelner Alt-Wert jeden config_load blockieren.
         out[0] = '\0';
         return ESP_OK;
     }
@@ -55,29 +59,39 @@ static esp_err_t read_u16(nvs_handle_t h, const char *key, uint16_t *out, uint16
 }
 
 // Falls Zufallswerte fehlen (Erstboot), einmalig generieren und schreiben.
+// Fehler werden zurueckgegeben statt zu panicen (abort() hier hiesse: ein
+// NVS-Schreibfehler wird zum Boot-Loop). Die generierten Werte stehen dann
+// zumindest fuer diese Laufzeit im cfg.
 static esp_err_t ensure_random_defaults(nvs_handle_t h, eul_config_t *cfg)
 {
+    esp_err_t r = ESP_OK;
     bool dirty = false;
     if (cfg->ap_pass[0] == '\0') {
         sec_random_password(cfg->ap_pass, sizeof(cfg->ap_pass), EUL_AP_PASS_LEN);
-        ESP_ERROR_CHECK(nvs_set_str(h, "ap_pass", cfg->ap_pass));
+        if (r == ESP_OK) r = nvs_set_str(h, "ap_pass", cfg->ap_pass);
         dirty = true;
     }
     if (cfg->admin_pass[0] == '\0') {
         sec_random_password(cfg->admin_pass, sizeof(cfg->admin_pass), EUL_ADMIN_PASS_LEN);
-        ESP_ERROR_CHECK(nvs_set_str(h, "admin_pass", cfg->admin_pass));
+        if (r == ESP_OK) r = nvs_set_str(h, "admin_pass", cfg->admin_pass);
         dirty = true;
     }
     if (cfg->tcp_token[0] == '\0') {
         sec_random_token(cfg->tcp_token, sizeof(cfg->tcp_token));
-        ESP_ERROR_CHECK(nvs_set_str(h, "tcp_token", cfg->tcp_token));
+        if (r == ESP_OK) r = nvs_set_str(h, "tcp_token", cfg->tcp_token);
         dirty = true;
     }
-    if (dirty) {
-        ESP_ERROR_CHECK(nvs_commit(h));
-        ESP_LOGI(TAG, "factory secrets initialized");
+    if (cfg->ota_token[0] == '\0') {
+        sec_random_token(cfg->ota_token, sizeof(cfg->ota_token));
+        if (r == ESP_OK) r = nvs_set_str(h, "ota_token", cfg->ota_token);
+        dirty = true;
     }
-    return ESP_OK;
+    if (dirty && r == ESP_OK) {
+        r = nvs_commit(h);
+        if (r == ESP_OK) ESP_LOGI(TAG, "factory secrets initialized");
+    }
+    if (r != ESP_OK) ESP_LOGE(TAG, "persisting factory secrets failed (%s)", esp_err_to_name(r));
+    return r;
 }
 
 // Sanity: provisioned=true erfordert eine non-empty SSID UND non-empty PW.
@@ -108,39 +122,52 @@ esp_err_t config_load(eul_config_t *out)
     esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
     if (r != ESP_OK) return r;
 
+    // Fehler sammeln statt ESP_ERROR_CHECK (=abort): config_load laeuft bei
+    // jedem Boot UND bei jedem HTTP-Request - ein abort() hier waere ein
+    // Boot-Loop bzw. Geraete-Reset wegen eines einzelnen NVS-Lesefehlers.
     uint8_t u8;
-    ESP_ERROR_CHECK(read_u8(h,  "provisioned", &u8, 0)); out->provisioned = u8 != 0;
-    ESP_ERROR_CHECK(read_u8(h,  "usb_en",      &u8, 0)); out->usb_enabled = u8 != 0;
-    ESP_ERROR_CHECK(read_u8(h,  "tcp_en",      &u8, 1)); out->tcp_enabled = u8 != 0;
-    ESP_ERROR_CHECK(read_u8(h,  "tcp_authreq", &u8, 1)); out->tcp_auth_required = u8 != 0;
-    ESP_ERROR_CHECK(read_u16(h, "tcp_port",    &out->tcp_port, CONFIG_EUL_DEFAULT_TCP_PORT));
+#define RD(call) do { if (r == ESP_OK) r = (call); } while (0)
+    RD(read_u8(h,  "provisioned", &u8, 0)); out->provisioned = u8 != 0;
+    RD(read_u8(h,  "usb_en",      &u8, 0)); out->usb_enabled = u8 != 0;
+    RD(read_u8(h,  "tcp_en",      &u8, 1)); out->tcp_enabled = u8 != 0;
+    RD(read_u8(h,  "tcp_authreq", &u8, 1)); out->tcp_auth_required = u8 != 0;
+    RD(read_u16(h, "tcp_port",    &out->tcp_port, CONFIG_EUL_DEFAULT_TCP_PORT));
 
-    ESP_ERROR_CHECK(read_str(h, "wifi_ssid",  out->wifi_ssid,  sizeof(out->wifi_ssid)));
-    ESP_ERROR_CHECK(read_str(h, "wifi_pass",  out->wifi_pass,  sizeof(out->wifi_pass)));
-    ESP_ERROR_CHECK(read_u8(h,  "ip_static", &u8, 0)); out->wifi_static = u8 != 0;
-    ESP_ERROR_CHECK(read_str(h, "ip_addr",    out->ip_addr,    sizeof(out->ip_addr)));
-    ESP_ERROR_CHECK(read_str(h, "ip_gw",      out->ip_gw,      sizeof(out->ip_gw)));
-    ESP_ERROR_CHECK(read_str(h, "ip_mask",    out->ip_mask,    sizeof(out->ip_mask)));
-    ESP_ERROR_CHECK(read_str(h, "ip_dns",     out->ip_dns,     sizeof(out->ip_dns)));
-    ESP_ERROR_CHECK(read_str(h, "ap_pass",    out->ap_pass,    sizeof(out->ap_pass)));
-    ESP_ERROR_CHECK(read_str(h, "admin_pass", out->admin_pass, sizeof(out->admin_pass)));
-    ESP_ERROR_CHECK(read_str(h, "tcp_token",  out->tcp_token,  sizeof(out->tcp_token)));
+    RD(read_str(h, "wifi_ssid",  out->wifi_ssid,  sizeof(out->wifi_ssid)));
+    RD(read_str(h, "wifi_pass",  out->wifi_pass,  sizeof(out->wifi_pass)));
+    RD(read_u8(h,  "ip_static", &u8, 0)); out->wifi_static = u8 != 0;
+    RD(read_str(h, "ip_addr",    out->ip_addr,    sizeof(out->ip_addr)));
+    RD(read_str(h, "ip_gw",      out->ip_gw,      sizeof(out->ip_gw)));
+    RD(read_str(h, "ip_mask",    out->ip_mask,    sizeof(out->ip_mask)));
+    RD(read_str(h, "ip_dns",     out->ip_dns,     sizeof(out->ip_dns)));
+    RD(read_str(h, "ap_pass",    out->ap_pass,    sizeof(out->ap_pass)));
+    RD(read_str(h, "admin_pass", out->admin_pass, sizeof(out->admin_pass)));
+    RD(read_str(h, "tcp_token",  out->tcp_token,  sizeof(out->tcp_token)));
+    RD(read_str(h, "ota_token",  out->ota_token,  sizeof(out->ota_token)));
 
-    ESP_ERROR_CHECK(read_str(h, "dev_name",   out->device_name, sizeof(out->device_name)));
-    ESP_ERROR_CHECK(read_str(h, "admin_user", out->admin_user,  sizeof(out->admin_user)));
+    RD(read_str(h, "dev_name",   out->device_name, sizeof(out->device_name)));
+    RD(read_str(h, "admin_user", out->admin_user,  sizeof(out->admin_user)));
     if (!out->admin_user[0]) strcpy(out->admin_user, "admin");
-    ESP_ERROR_CHECK(read_str(h, "ntp_srv",    out->ntp_server,  sizeof(out->ntp_server)));
+    RD(read_str(h, "ntp_srv",    out->ntp_server,  sizeof(out->ntp_server)));
     if (!out->ntp_server[0]) strcpy(out->ntp_server, "pool.ntp.org");
-    ESP_ERROR_CHECK(read_str(h, "tz",         out->tz,          sizeof(out->tz)));
+    RD(read_str(h, "tz",         out->tz,          sizeof(out->tz)));
     if (!out->tz[0]) strcpy(out->tz, "CET-1CEST,M3.5.0,M10.5.0/3");
 
-    ESP_ERROR_CHECK(read_u8(h,  "api_en",    &u8, 0)); out->api_enabled  = u8 != 0;
+    RD(read_u8(h,  "api_en",    &u8, 0)); out->api_enabled  = u8 != 0;
+#undef RD
 
-    ESP_ERROR_CHECK(ensure_random_defaults(h, out));
-    sanity_check_and_fix(h, out);
+    if (r == ESP_OK) {
+        // Persist-Fehler der Zufalls-Secrets sind NICHT fatal: die Werte
+        // stehen fuer diese Laufzeit im cfg und werden im Provisioning-Modus
+        // ohnehin auf der Konsole ausgegeben. Ein Fehlschlag hier darf ein
+        // sonst funktionierendes Gateway nicht lahmlegen.
+        (void)ensure_random_defaults(h, out);
+        sanity_check_and_fix(h, out);
+    }
 
     nvs_close(h);
-    return ESP_OK;
+    if (r != ESP_OK) ESP_LOGE(TAG, "config_load failed (%s)", esp_err_to_name(r));
+    return r;
 }
 
 // -----------------------------------------------------------------------------
@@ -264,6 +291,24 @@ esp_err_t config_regen_tcp_token(char *out, size_t out_size)
     return ESP_OK;
 }
 
+esp_err_t config_regen_ota_token(char *out, size_t out_size)
+{
+    char tok[EUL_TCP_TOKEN_MAX];
+    sec_random_token(tok, sizeof(tok));
+
+    nvs_handle_t h;
+    esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
+    if (r != ESP_OK) return r;
+    r  = nvs_set_str(h, "ota_token", tok);
+    if (r == ESP_OK) r = nvs_commit(h);
+    nvs_close(h);
+    if (r != ESP_OK) return r;
+
+    if (out && out_size >= sizeof(tok)) strcpy(out, tok);
+    sec_event("ota_token_regen", "new ota token issued");
+    return ESP_OK;
+}
+
 esp_err_t config_set_admin_pass(const char *new_pass)
 {
     if (!new_pass || strlen(new_pass) < 8) return ESP_ERR_INVALID_ARG;
@@ -282,9 +327,10 @@ esp_err_t config_factory_reset(void)
     nvs_handle_t h;
     esp_err_t r = nvs_open(NS, NVS_READWRITE, &h);
     if (r != ESP_OK) return r;
-    ESP_ERROR_CHECK(nvs_erase_all(h));
-    ESP_ERROR_CHECK(nvs_commit(h));
+    r = nvs_erase_all(h);
+    if (r == ESP_OK) r = nvs_commit(h);
     nvs_close(h);
-    sec_event("factory_reset", "nvs wiped");
-    return ESP_OK;
+    if (r == ESP_OK) sec_event("factory_reset", "nvs wiped");
+    else             sec_event("factory_reset_fail", "err=%s", esp_err_to_name(r));
+    return r;
 }

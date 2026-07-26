@@ -21,6 +21,7 @@ interface State {
     tcp_port: number;
     tcp_auth_required: boolean;
     tcp_token: string;
+    ota_token: string;
     admin_pass: string;
     api_enabled: boolean;
     device_name: string;
@@ -260,6 +261,7 @@ const api = {
             body: JSON.stringify(body),
         }),
     regenToken: (): Promise<{ token: string }> => apiJson('/api/regen-token', { method: 'POST' }),
+    regenOtaToken: (): Promise<{ token: string }> => apiJson('/api/regen-ota-token', { method: 'POST' }),
     factoryReset: (): Promise<{ ok: boolean }> => apiJson('/api/factory-reset', { method: 'POST' }),
     reboot: (): Promise<{ ok: boolean }> => apiJson('/api/reboot', { method: 'POST' }),
     baseIdRead: (): Promise<BaseIdResp> => apiJson('/api/baseid', { method: 'GET' }),
@@ -358,6 +360,7 @@ function escapeHtml(s: string): string {
 let tokenDisplay: SecretDisplay;
 let adminDisplay: SecretDisplay;
 let apiTokenDisplay: SecretDisplay;
+let otaTokenDisplay: SecretDisplay;
 
 async function loadState(): Promise<void> {
     try {
@@ -372,6 +375,7 @@ async function loadState(): Promise<void> {
         adminDisplay.set(s.admin_pass);
         byId<HTMLInputElement>('api_en').checked = s.api_enabled;
         apiTokenDisplay.set(s.tcp_token);
+        otaTokenDisplay.set(s.ota_token);
         byId<HTMLInputElement>('dev_name').value = s.device_name || '';
         byId<HTMLInputElement>('admin_user').value = s.admin_user || 'admin';
         byId<HTMLInputElement>('ntp_server').value = s.ntp_server || 'pool.ntp.org';
@@ -422,6 +426,16 @@ async function doRegenToken(): Promise<void> {
         apiTokenDisplay.set(r.token);
         renderApiDoc(r.token, byId<HTMLInputElement>('api_en').checked);
         say('neuer Token');
+    } catch (e) {
+        say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
+    }
+}
+
+async function doRegenOtaToken(): Promise<void> {
+    try {
+        const r = await api.regenOtaToken();
+        otaTokenDisplay.set(r.token);
+        say('neuer OTA-Token');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -546,6 +560,31 @@ async function doReboot(): Promise<void> {
     }
 }
 
+// Nach erfolgreichem OTA: warten bis das Geraet aus dem Reboot zurueck ist,
+// dann Portal neu laden (zeigt direkt die neue Versionsnummer).
+async function waitForDeviceBack(prog: HTMLElement): Promise<void> {
+    const t0 = Date.now();
+    // Reboot beginnt ~0.5 s nach der Antwort; die ersten Sekunden nicht pollen.
+    await new Promise((r) => setTimeout(r, 3000));
+    while (Date.now() - t0 < 120000) {
+        const sec = Math.round((Date.now() - t0) / 1000);
+        prog.textContent = `Geraet startet neu ... warte auf Wiederverbindung (${sec}s)`;
+        try {
+            const ctl = new AbortController();
+            const to = setTimeout(() => ctl.abort(), 1500);
+            const r = await fetch('/api/state', { signal: ctl.signal, cache: 'no-store' });
+            clearTimeout(to);
+            if (r.ok) {
+                prog.textContent = 'Update abgeschlossen — Portal wird neu geladen ...';
+                setTimeout(() => location.reload(), 800);
+                return;
+            }
+        } catch { /* noch nicht erreichbar -> weiter pollen */ }
+        await new Promise((r) => setTimeout(r, 1500));
+    }
+    prog.textContent = 'Geraet meldet sich nicht zurueck — Seite bitte manuell neu laden.';
+}
+
 function doOtaUpload(): void {
     const input = byId<HTMLInputElement>('ota_file');
     const file = input.files && input.files[0];
@@ -553,31 +592,54 @@ function doOtaUpload(): void {
     if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Geraet startet danach neu.`)) return;
 
     const prog = byId('ota_progress');
+    const wrap = byId('ota_bar_wrap');
+    const bar = byId('ota_bar');
     const btn = byId<HTMLButtonElement>('btn-ota');
     btn.disabled = true;
+    wrap.style.display = 'block';
+    wrap.classList.remove('indet');
+    bar.style.width = '0%';
 
     // XHR statt fetch, um den Upload-Fortschritt anzuzeigen. Basic-Auth wird vom
     // Browser (same-origin) automatisch mitgeschickt.
     const xhr = new XMLHttpRequest();
+    const t0 = Date.now();
     xhr.open('POST', '/api/ota');
     xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            prog.textContent = `Upload ${pct}%  (${fmtBytes(e.loaded)} / ${fmtBytes(e.total)})`;
-        }
+        if (!e.lengthComputable) return;
+        const pct = (e.loaded / e.total) * 100;
+        bar.style.width = `${pct.toFixed(1)}%`;
+        const dt = (Date.now() - t0) / 1000;
+        const rate = dt > 0.3 ? e.loaded / dt : 0;
+        const eta = rate > 0 ? Math.max(1, Math.round((e.total - e.loaded) / rate)) : 0;
+        prog.textContent =
+            `Upload ${Math.round(pct)} %  ·  ${fmtBytes(e.loaded)} / ${fmtBytes(e.total)}` +
+            (rate > 0 ? `  ·  ${fmtBytes(rate)}/s  ·  noch ~${eta}s` : '');
+    };
+    // Alle Bytes sind raus - jetzt validiert das Geraet das Image und setzt die
+    // Boot-Partition. Dauert ein paar Sekunden ohne Byte-Fortschritt.
+    xhr.upload.onload = () => {
+        bar.style.width = '100%';
+        wrap.classList.add('indet');
+        prog.textContent = 'Upload fertig — Geraet prueft und aktiviert das Image ...';
     };
     xhr.onload = () => {
-        btn.disabled = false;
+        wrap.classList.remove('indet');
         if (xhr.status === 200) {
-            prog.textContent = 'Update erfolgreich — Geraet startet neu ...';
+            bar.style.width = '100%';
             say('Firmware aktualisiert, Neustart');
+            void waitForDeviceBack(prog);
         } else {
+            btn.disabled = false;
+            wrap.style.display = 'none';
             prog.textContent = `Fehler ${xhr.status}: ${xhr.responseText}`;
             say('OTA fehlgeschlagen');
         }
     };
     xhr.onerror = () => {
         btn.disabled = false;
+        wrap.classList.remove('indet');
+        wrap.style.display = 'none';
         prog.textContent = 'Upload-Fehler (Verbindung abgebrochen). Nochmal versuchen.';
     };
     prog.textContent = 'Upload startet ...';
@@ -1318,10 +1380,12 @@ function init(): void {
     tokenDisplay = new SecretDisplay(byId('token'));
     adminDisplay = new SecretDisplay(byId('adminp'));
     apiTokenDisplay = new SecretDisplay(byId('api_token'));
+    otaTokenDisplay = new SecretDisplay(byId('ota_token'));
 
     byId('btn-scan').addEventListener('click', doScan);
     byId('btn-regen').addEventListener('click', doRegenToken);
     byId('btn-regen2').addEventListener('click', doRegenToken);
+    byId('btn-regen-ota').addEventListener('click', doRegenOtaToken);
     byId('btn-save').addEventListener('click', doSave);
     byId('btn-reboot').addEventListener('click', doReboot);
     byId('btn-ota').addEventListener('click', doOtaUpload);

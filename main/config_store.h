@@ -49,6 +49,8 @@ typedef struct {
     char     ap_pass[EUL_AP_PASS_MAX];       // SoftAP WPA2 Passphrase
     char     admin_pass[EUL_ADMIN_PASS_MAX]; // Portal-Login im STA-Modus
     char     tcp_token[EUL_TCP_TOKEN_MAX];   // AUTH-Token fuer TCP-Clients + REST-API
+    char     ota_token[EUL_TCP_TOKEN_MAX];   // Token NUR fuer /api/ota (FW-Update
+                                             // delegierbar ohne Admin-Passwort)
 } eul_config_t;
 
 // Laedt Config aus NVS. Bei fehlendem Namespace / erstem Boot werden
@@ -89,6 +91,9 @@ esp_err_t config_save_integrations(bool api_enabled);
 
 // Erzeugt einen frischen TCP-Auth-Token, persistiert nur diesen Key.
 esp_err_t config_regen_tcp_token(char *out, size_t out_size);
+
+// Erzeugt einen frischen OTA-Token (nur /api/ota), persistiert nur diesen Key.
+esp_err_t config_regen_ota_token(char *out, size_t out_size);
 
 // Setzt ein neues Admin-Passwort (Portal, STA-Modus), persistiert nur diesen Key.
 esp_err_t config_set_admin_pass(const char *new_pass);

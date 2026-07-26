@@ -1,6 +1,7 @@
 #include "tcp_server.h"
 #include "board_config.h"
 #include "sdkconfig.h"
+#include "config_store.h"
 #include "esp3_parser.h"
 #include "enocean_uart.h"
 #include "security.h"
@@ -36,6 +37,7 @@ typedef struct {
     bool                 cleaned;    // idempotent-flag fuer close_slot
     volatile bool        tx_running; // von TX-Task gesetzt/geloescht
     int                  sock;
+    uint32_t             ip_be;      // Peer-IP (fuer Rate-Limit im RX-Task)
     char                 peer[24];
     StreamBufferHandle_t tx;
     esp3_parser_t        parser;
@@ -50,7 +52,10 @@ static SemaphoreHandle_t s_slots_mtx;
 
 static uint16_t    s_port;
 static bool        s_auth_req;
-static const char *s_token;
+// Eigener Puffer, KEIN Zeiger auf den Aufrufer: mode_mgr uebergibt den Token
+// aus einem Stackframe, der nach dem Boot nicht mehr existiert (app_main-Task
+// wird geloescht). Ein gemerkter Zeiger waere dangling.
+static char        s_token[EUL_TCP_TOKEN_MAX];
 
 // -----------------------------------------------------------------------------
 // Rate limit gegen AUTH-Bruteforce: pro IP zaehlen wir Fehl-Auths in einem
@@ -217,6 +222,23 @@ static void client_rx_task(void *arg)
 {
     client_slot_t *c = (client_slot_t *)arg;
     uint8_t buf[256];
+
+    // AUTH-Handshake HIER im Client-Task statt im accept_task: ein schweigender
+    // Client blockiert so nicht mehr den Accept-Loop (und damit alle anderen
+    // Verbindungen) fuer die Dauer des Timeouts.
+    if (c->active && !c->authed) {
+        if (do_auth_handshake(c->sock, c->ip_be)) {
+            c->authed = true;
+            console_logf("++ %s auth ok", c->peer);
+        } else {
+            sec_event("auth_fail", "peer=%s", c->peer);
+            rl_record_fail(c->ip_be);
+            // Kleine Verzoegerung erschwert Bruteforce zusaetzlich
+            vTaskDelay(pdMS_TO_TICKS(500));
+            c->active = false;
+        }
+    }
+
     while (c->active) {
         int n = recv(c->sock, buf, sizeof(buf), 0);
         if (n <= 0) {
@@ -232,7 +254,12 @@ static void client_rx_task(void *arg)
     // freigibt - sonst wuerde vStreamBufferDelete unter ihm crashen.
     c->active = false;
     if (c->sock >= 0) shutdown(c->sock, SHUT_RDWR);
-    for (int i = 0; i < 40 && c->tx_running; i++) {
+    // Unbegrenzt warten - der TX-Task terminiert garantiert: active=false
+    // beendet seine Schleife, ein blockierendes send() wird durch shutdown()
+    // aufgebrochen und xStreamBufferReceive laeuft max. 200 ms in den Timeout.
+    // Ein Zeitdeckel hier wuerde im Grenzfall den StreamBuffer unter dem noch
+    // lebenden TX-Task loeschen (Use-after-free).
+    while (c->tx_running) {
         vTaskDelay(pdMS_TO_TICKS(25));
     }
     close_slot(c);
@@ -284,7 +311,8 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     // ueberhaupt losgelaufen ist. Sonst gaebe der RX-Task den Slot frei und der
     // gleich startende TX-Task griffe auf freigegebenen Speicher zu (Crash).
     slot->tx_running      = true;
-    slot->authed          = !s_auth_req;
+    slot->authed          = !s_auth_req;   // sonst: Handshake im RX-Task
+    slot->ip_be           = addr->sin_addr.s_addr;
     slot->connected_at_us = esp_timer_get_time();
     slot->tx              = xStreamBufferCreate(CONFIG_EUL_CLIENT_TX_STREAM_SIZE, 1);
     esp3_parser_init(&slot->parser, on_esp3_frame, slot);
@@ -318,7 +346,7 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     ESP_LOGI(TAG, "client %s connected%s", slot->peer,
              s_auth_req ? " (auth required)" : "");
     console_logf("++ %s connected%s", slot->peer,
-                 s_auth_req ? " (auth ok)" : "");
+                 s_auth_req ? " (auth pending)" : "");
     EVT_INFO("tcp", "Client %s verbunden", slot->peer);
     return true;
 }
@@ -379,22 +407,9 @@ static void accept_task(void *arg)
         setsockopt(csock, IPPROTO_TCP, TCP_KEEPINTVL,&intvl, sizeof(intvl));
         setsockopt(csock, IPPROTO_TCP, TCP_KEEPCNT,  &cnt,   sizeof(cnt));
 
-        // AUTH-Handshake VOR dem Spawn - im accept-Task ist es simpler und
-        // haelt fehlgeschlagene AUTH-Attempts aus der Client-Slot-Ressource raus.
-        if (s_auth_req) {
-            if (!do_auth_handshake(csock, ip_be)) {
-                sec_event("auth_fail", "peer=%d.%d.%d.%d",
-                          (int)(ip_be & 0xff),
-                          (int)((ip_be >> 8) & 0xff),
-                          (int)((ip_be >> 16) & 0xff),
-                          (int)((ip_be >> 24) & 0xff));
-                rl_record_fail(ip_be);
-                // Kleine Verzoegerung erschwert Bruteforce zusaetzlich
-                vTaskDelay(pdMS_TO_TICKS(500));
-                close(csock);
-                continue;
-            }
-        }
+        // AUTH-Handshake laeuft im Client-RX-Task (spawn_client), NICHT hier:
+        // sonst blockiert ein schweigender Client den Accept-Loop fuer bis zu
+        // EUL_AUTH_TCP_TIMEOUT_MS und sperrt damit alle anderen Verbindungen aus.
 
         // spawn_client uebernimmt den Socket in JEDEM Fall (Erfolg: Client-Tasks;
         // Misserfolg: schliesst selbst). Hier daher KEIN close() mehr - sonst
@@ -410,7 +425,7 @@ esp_err_t tcp_server_start(uint16_t port, bool auth_required, const char *token)
     if (auth_required && (!token || !token[0])) return ESP_ERR_INVALID_ARG;
     s_port     = port ? port : CONFIG_EUL_DEFAULT_TCP_PORT;
     s_auth_req = auth_required;
-    s_token    = token;
+    snprintf(s_token, sizeof(s_token), "%s", token ? token : "");
 
     s_slots_mtx = xSemaphoreCreateMutex();
     s_rl_mtx    = xSemaphoreCreateMutex();
@@ -430,7 +445,9 @@ void tcp_server_broadcast(const uint8_t *data, size_t len)
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
         client_slot_t *c = &s_clients[i];
-        if (!c->active || !c->tx) continue;
+        // Nur an authentifizierte Clients senden - der Handshake laeuft jetzt
+        // im RX-Task, ein Slot kann also kurzzeitig unauthed aktiv sein.
+        if (!c->active || !c->authed || !c->tx) continue;
         (void)xStreamBufferSend(c->tx, data, len, 0);
     }
     xSemaphoreGive(s_slots_mtx);
@@ -441,7 +458,7 @@ int tcp_server_active_clients(void)
     int n = 0;
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
-        if (s_clients[i].active) n++;
+        if (s_clients[i].active && s_clients[i].authed) n++;
     }
     xSemaphoreGive(s_slots_mtx);
     return n;
@@ -458,7 +475,7 @@ int tcp_server_dump_clients_json(char *out, size_t out_size)
     bool first = true;
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
         const client_slot_t *c = &s_clients[i];
-        if (!c->active) continue;
+        if (!c->active || !c->authed) continue;
         if (!first) {
             if (p + 1 >= out_size) break;
             out[p++] = ',';

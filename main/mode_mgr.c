@@ -103,7 +103,7 @@ static void mdns_up(uint16_t tcp_port, bool tcp_enabled, const char *device_name
         mdns_service_add(NULL, "_enocean", "_tcp", tcp_port, NULL, 0);
         mdns_txt_item_t txt[] = {
             { "proto", "esp3" },
-            { "baud",  "57600" },
+            { "baud",  "460800" },   // TCM515 laeuft im Busware-Turbo-Mode
         };
         mdns_service_txt_set("_enocean", "_tcp", txt, 2);
     }
@@ -313,7 +313,17 @@ esp_err_t mode_mgr_start(void)
     }
 
     eul_config_t cfg;
-    ESP_ERROR_CHECK(config_load(&cfg));
+    if (config_load(&cfg) != ESP_OK) {
+        // NVS defekt/nicht lesbar: NICHT panicen (waere ein Boot-Loop), sondern
+        // mit Laufzeit-Secrets in den Provisioning-Modus fallen - dort ist das
+        // Geraet wenigstens erreichbar und die Credentials laufen im
+        // 5-s-Beacon ueber die USB-Konsole.
+        EVT_ERR("boot", "config_load fehlgeschlagen -> Provisioning mit Laufzeit-Secrets");
+        memset(&cfg, 0, sizeof(cfg));
+        sec_random_password(cfg.ap_pass,    sizeof(cfg.ap_pass),    EUL_AP_PASS_LEN);
+        sec_random_password(cfg.admin_pass, sizeof(cfg.admin_pass), EUL_ADMIN_PASS_LEN);
+        sec_random_token(cfg.tcp_token,     sizeof(cfg.tcp_token));
+    }
 
     // TCM515 in JEDEM Modus hochfahren (spart Zeit, wenn Provisioning schnell
     // durchlaeuft) und Broadcast-Callback binden.

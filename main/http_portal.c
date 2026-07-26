@@ -117,6 +117,7 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "tcp_port",        cfg.tcp_port);
     cJSON_AddBoolToObject(root, "tcp_auth_required", cfg.tcp_auth_required);
     cJSON_AddStringToObject(root, "tcp_token",       cfg.tcp_token);
+    cJSON_AddStringToObject(root, "ota_token",       cfg.ota_token);
     cJSON_AddBoolToObject(root, "api_enabled",   cfg.api_enabled);
     cJSON_AddStringToObject(root, "device_name", cfg.device_name);
     cJSON_AddStringToObject(root, "fw_version", EUL_FW_VERSION);
@@ -139,10 +140,11 @@ static esp_err_t h_state(httpd_req_t *req)
                             s_ap_mode ? cfg.admin_pass : "");
 
     char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, out);
     free(out);
-    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -187,10 +189,11 @@ static esp_err_t h_scan(httpd_req_t *req)
     free(aps);
 
     char *out = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    if (!out) { httpd_resp_send_500(req); return ESP_FAIL; }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, out);
     free(out);
-    cJSON_Delete(arr);
     return ESP_OK;
 }
 
@@ -240,6 +243,16 @@ static esp_err_t h_config(httpd_req_t *req)
     const cJSON *tcp  = cJSON_GetObjectItem(j, "tcp_enabled");
     const cJSON *ta   = cJSON_GetObjectItem(j, "tcp_auth_required");
     const cJSON *port = cJSON_GetObjectItem(j, "tcp_port");
+
+    // Port validieren BEVOR irgendetwas gespeichert wird: 1..65535, und nicht
+    // 80 (dort laeuft das Portal - eine Kollision macht beides unbrauchbar).
+    if (port && cJSON_IsNumber(port) &&
+        (port->valueint < 1 || port->valueint > 65535 || port->valueint == 80)) {
+        cJSON_Delete(j);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "tcp_port must be 1..65535 (not 80)");
+        return ESP_OK;
+    }
 
     // WiFi-Credentials NUR paarweise und NUR wenn wirklich neue Werte
     // geliefert wurden. Sonst bleiben SSID und PW im NVS unangetastet.
@@ -327,10 +340,31 @@ static esp_err_t h_regen_token(httpd_req_t *req)
     return httpd_resp_sendstr(req, reply);
 }
 
+// POST /api/regen-ota-token -> neuer OTA-Token (Basic-Auth; der alte Token
+// verliert sofort seine Gueltigkeit).
+static esp_err_t h_regen_ota_token(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+    char tok[EUL_TCP_TOKEN_MAX];
+    if (config_regen_ota_token(tok, sizeof(tok)) != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    char reply[128];
+    snprintf(reply, sizeof(reply), "{\"token\":\"%s\"}", tok);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, reply);
+}
+
 static esp_err_t h_factory(httpd_req_t *req)
 {
     if (!require_auth(req)) return ESP_OK;
-    config_factory_reset();
+    if (config_factory_reset() != ESP_OK) {
+        // NVS-Wipe fehlgeschlagen -> NICHT rebooten, sonst kommt das Geraet
+        // mit alter Config wieder hoch und der Nutzer wundert sich.
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     httpd_resp_sendstr(req, "{\"ok\":true}");
     schedule_reboot();
     return ESP_OK;
@@ -576,27 +610,47 @@ static size_t parse_hex_str(const char *s, uint8_t *out, size_t outcap)
     return n;
 }
 
+// Token aus "Authorization: Bearer <t>" oder "?token=<t>" extrahieren.
+static void get_req_token(httpd_req_t *req, char *out, size_t out_size)
+{
+    out[0] = '\0';
+    char auth[128];
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth, sizeof(auth)) == ESP_OK &&
+        strncmp(auth, "Bearer ", 7) == 0) {
+        // Bewusst gekappt kopieren: ein Token laenger als out_size-1 kann
+        // ohnehin nicht matchen.
+        const char *tok = auth + 7;
+        size_t k = 0;
+        while (tok[k] && k + 1 < out_size) { out[k] = tok[k]; k++; }
+        out[k] = '\0';
+    }
+    if (!out[0]) {
+        char q[192];
+        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+            httpd_query_key_value(q, "token", out, out_size);
+        }
+    }
+}
+
 static bool api_authorized(httpd_req_t *req, const eul_config_t *cfg)
 {
     if (!cfg->api_enabled) return false;
     char provided[EUL_TCP_TOKEN_MAX] = {0};
-
-    char auth[128];
-    if (httpd_req_get_hdr_value_str(req, "Authorization", auth, sizeof(auth)) == ESP_OK &&
-        strncmp(auth, "Bearer ", 7) == 0) {
-        const char *tok = auth + 7;
-        size_t k = 0;
-        while (tok[k] && k < sizeof(provided) - 1) { provided[k] = tok[k]; k++; }
-        provided[k] = '\0';
-    }
-    if (!provided[0]) {
-        char q[192];
-        if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
-            httpd_query_key_value(q, "token", provided, sizeof(provided));
-        }
-    }
+    get_req_token(req, provided, sizeof(provided));
     if (!provided[0]) return false;
     return sec_constant_time_equal(provided, cfg->tcp_token);
+}
+
+// OTA-Token-Check: eigener Token NUR fuer /api/ota, damit Update-Rechte
+// delegierbar sind ohne das Admin-Passwort weiterzugeben. Unabhaengig von
+// api_enabled (das schaltet nur die Telegramm-REST-API).
+static bool ota_token_ok(httpd_req_t *req, const eul_config_t *cfg)
+{
+    if (!cfg->ota_token[0]) return false;
+    char provided[EUL_TCP_TOKEN_MAX] = {0};
+    get_req_token(req, provided, sizeof(provided));
+    if (!provided[0]) return false;
+    return sec_constant_time_equal(provided, cfg->ota_token);
 }
 
 static esp_err_t api_reject(httpd_req_t *req)
@@ -652,10 +706,17 @@ static esp_err_t h_send(httpd_req_t *req)
 }
 
 // POST /api/ota  Body = rohes Firmware-.bin -> in die inaktive OTA-Partition
-// schreiben, als Boot-Partition setzen, neu starten (Basic-Auth).
+// schreiben, als Boot-Partition setzen, neu starten.
+// Auth: OTA-Token (Bearer/Query) ODER Basic-Auth.
 static esp_err_t h_ota(httpd_req_t *req)
 {
-    if (!require_auth(req)) return ESP_OK;
+    eul_config_t cfg;
+    if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
+    if (ota_token_ok(req, &cfg)) {
+        sec_event("ota_token_auth", "update via ota token");
+    } else if (!check_basic_auth(req, &cfg)) {
+        return ESP_OK;   // 401 wurde bereits gesendet
+    }
 
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -708,7 +769,10 @@ esp_err_t http_portal_start(bool ap_mode)
     s_ap_mode = ap_mode;
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 16;
+    // Achtung: muss ALLE registrierten Handler decken - im AP-Modus kommen zu
+    // den API-Handlern noch 4 Captive-Portal-Redirects dazu. Mit 16 schlugen
+    // deren Registrierungen frueher still fehl.
+    cfg.max_uri_handlers = 24;
     cfg.stack_size = 8192;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     // Mehr gleichzeitige Verbindungen zulassen und alte automatisch schliessen
@@ -732,6 +796,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_sc   = { .uri="/api/scan",  .method=HTTP_GET,  .handler=h_scan  };
     httpd_uri_t u_cf   = { .uri="/api/config", .method=HTTP_POST, .handler=h_config };
     httpd_uri_t u_rt   = { .uri="/api/regen-token", .method=HTTP_POST, .handler=h_regen_token };
+    httpd_uri_t u_rot  = { .uri="/api/regen-ota-token", .method=HTTP_POST, .handler=h_regen_ota_token };
     httpd_uri_t u_fr   = { .uri="/api/factory-reset", .method=HTTP_POST, .handler=h_factory };
     httpd_uri_t u_rb   = { .uri="/api/reboot", .method=HTTP_POST, .handler=h_reboot };
     httpd_uri_t u_cl   = { .uri="/api/clients", .method=HTTP_GET, .handler=h_clients };
@@ -754,6 +819,7 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_sc);
     httpd_register_uri_handler(srv, &u_cf);
     httpd_register_uri_handler(srv, &u_rt);
+    httpd_register_uri_handler(srv, &u_rot);
     httpd_register_uri_handler(srv, &u_fr);
     httpd_register_uri_handler(srv, &u_rb);
     httpd_register_uri_handler(srv, &u_cl);
