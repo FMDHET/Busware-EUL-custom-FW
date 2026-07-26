@@ -1,4 +1,4 @@
-// EUL22 Konfigurations-Portal (Frontend).
+// EUL Konfigurations-Portal (Frontend).
 //
 // Wird via esbuild in ein einzelnes IIFE gebundelt, in index.html
 // eingebettet und dann als C-String in main/portal_html.h abgelegt.
@@ -47,6 +47,7 @@ interface Client {
     rx_bytes: number;
     tx_bytes: number;
     rx_frames: number;
+    tx_dropped: number;   // verworfen, weil der Client zu langsam liest
 }
 
 interface Stats {
@@ -665,20 +666,26 @@ async function pollClients(): Promise<void> {
         const arr = await api.clients();
         const body = byId('cli_body');
         if (!arr.length) {
-            body.innerHTML = '<tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="hint">keine aktiven Verbindungen</td></tr>';
             return;
         }
         body.innerHTML = arr
-            .map(
-                (c) =>
-                    `<tr>` +
+            .map((c) => {
+                // Verworfene Bytes hervorheben: > 0 heisst, der Client liest zu
+                // langsam und hat Telegramme verpasst.
+                const drop = c.tx_dropped || 0;
+                const dropCell = drop > 0
+                    ? `<b style="color:var(--danger)">${fmtBytes(drop)}</b>`
+                    : '—';
+                return `<tr>` +
                     `<td data-label="Peer" style="font-family:ui-monospace,monospace">${escapeHtml(c.peer)}</td>` +
                     `<td data-label="Uptime" style="text-align:center">${fmtUptime(c.connected_ms)}</td>` +
                     `<td data-label="RX" style="text-align:right">${fmtBytes(c.rx_bytes)}</td>` +
                     `<td data-label="TX" style="text-align:right">${fmtBytes(c.tx_bytes)}</td>` +
                     `<td data-label="Frames" style="text-align:center">${c.rx_frames}</td>` +
-                    `</tr>`
-            )
+                    `<td data-label="Verworfen" style="text-align:right">${dropCell}</td>` +
+                    `</tr>`;
+            })
             .join('');
     } catch {
         // silent

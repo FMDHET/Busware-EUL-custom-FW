@@ -127,6 +127,7 @@ static void on_frame(const uint8_t *frame, size_t len, void *user)
     (void)user;
     // nur RADIO_ERP1 (Packet-Type 0x01) in die Telemetrie
     if (len < 7 || frame[4] != 0x01) return;
+    if (!s_mtx) return;   // telemetry_init() nie gelaufen / Mutex-Anlage schlug fehl
 
     int64_t ms = esp_timer_get_time() / 1000;
     struct timeval tv;

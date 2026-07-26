@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-EUL22 Verbindungs-Monitor (GUI)
+EUL Verbindungs-Monitor (GUI)
 
-Ueberwacht die TCP-Verbindung zum EUL22-Gateway so, wie Home Assistant sie
+Ueberwacht die TCP-Verbindung zum EUL-Gateway so, wie Home Assistant sie
 nutzt: das Tool baut selbst eine Dauerverbindung zum ESP3-TCP-Port auf und
 protokolliert jeden Abbruch und Wiederaufbau mit Zeitstempel und Dauer. So
 sieht man zuverlaessig, OB und WANN die Verbindung abreisst (z.B. durch das
@@ -166,7 +166,7 @@ class Monitor:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EUL22 Verbindungs-Monitor")
+        self.title("EUL Verbindungs-Monitor")
         self.geometry("760x560")
         self.minsize(620, 460)
         self.q = queue.Queue()

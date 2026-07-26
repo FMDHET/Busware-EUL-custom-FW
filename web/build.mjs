@@ -1,4 +1,4 @@
-// Build-Skript fuer das EUL22-Portal.
+// Build-Skript fuer das EUL-Portal.
 //   1) esbuild bundelt src/main.ts -> minifed IIFE-JavaScript
 //   2) das Bundle wird an der <!--SCRIPT--> Stelle in index.html eingebettet
 //   3) das komplette Dokument wird als C-String nach ../main/portal_html.h

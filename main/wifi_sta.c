@@ -194,8 +194,11 @@ esp_err_t wifi_sta_start_and_wait(const char *ssid, const char *pass,
         IP_EVENT, IP_EVENT_STA_GOT_IP, &on_event, NULL, &s_h_ip));
 
     wifi_config_t wc = { 0 };
-    strncpy((char *)wc.sta.ssid,     ssid, sizeof(wc.sta.ssid) - 1);
-    if (pass) strncpy((char *)wc.sta.password, pass, sizeof(wc.sta.password) - 1);
+    // ssid/password sind Byte-Felder OHNE NUL-Zwang: eine 32-Zeichen-SSID darf
+    // das Feld voll ausfuellen. Mit strncpy(..., size-1) wuerde sie auf 31
+    // Zeichen gekappt und die Verbindung schluege dauerhaft fehl.
+    memcpy(wc.sta.ssid, ssid, strnlen(ssid, sizeof(wc.sta.ssid)));
+    if (pass) memcpy(wc.sta.password, pass, strnlen(pass, sizeof(wc.sta.password)));
     wc.sta.threshold.authmode = (pass && pass[0]) ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
     // 802.11k/v/MBO aktivieren (Support in sdkconfig): damit kann das FritzBox-
@@ -252,11 +255,16 @@ void wifi_sta_stop(void)
     if (!s_started) return;
     // Zuerst den Reconnect-Timer stoppen, damit reconnect_cb NICHT nach dem
     // esp_wifi_deinit() noch esp_wifi_connect() aufruft (Crash).
-    if (s_reconnect_timer) esp_timer_stop(s_reconnect_timer);
+    if (s_reconnect_timer) {
+        esp_timer_stop(s_reconnect_timer);
+        esp_timer_delete(s_reconnect_timer);
+        s_reconnect_timer = NULL;
+    }
     esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi);
     esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);
     esp_wifi_disconnect();
     esp_wifi_stop();
     esp_wifi_deinit();
+    if (s_wifi_evt) { vEventGroupDelete(s_wifi_evt); s_wifi_evt = NULL; }
     s_started = false;
 }

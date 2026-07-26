@@ -3,16 +3,16 @@
 #include "sdkconfig.h"
 
 // -----------------------------------------------------------------------------
-// Busware EUL22 - Board Pin Map
-// Quelle: schematics/EUL22.pdf
+// Busware EUL - Board Pin Map
+// Quelle: schematics/EUL.pdf
 // -----------------------------------------------------------------------------
 // Alle laufzeit-relevanten Parameter (WiFi-Credentials, TCP-Port,
 // Client-Zahl, mDNS-Name, ...) liegen in Kconfig.projbuild.
-// -> "pio run -t menuconfig" -> Component config -> Busware EUL22 Gateway.
+// -> "pio run -t menuconfig" -> Component config -> Busware EUL Gateway.
 // -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
-// TCM515-Ansteuerung (Busware EUL22, ESP32-C3)
+// TCM515-Ansteuerung (Busware EUL, ESP32-C3)
 // -----------------------------------------------------------------------------
 // Pins aus drei Quellen abgeleitet und verifiziert (E2E round-trip):
 //
@@ -32,7 +32,7 @@
 //          - variants/busware32c3/pins_arduino.h:
 //              TX=21, RX=20, LED_BUILTIN=4, D1=3, D2=4, D3=5, D10=10
 //
-//   3) Schematic (schematics/EUL22.pdf):
+//   3) Schematic (schematics/EUL.pdf):
 //        TCM515 pins 20 UART_RX, 21 UART_TX, 24 NRST, 27 PROG
 //        R6=22R zwischen TCM515.TX und ESP32.U0RXD
 //

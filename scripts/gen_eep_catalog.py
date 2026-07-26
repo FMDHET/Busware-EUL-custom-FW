@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EEP-Katalog-Generator fuer das EUL22-Portal.
+"""EEP-Katalog-Generator fuer das EUL-Portal.
 
 Liest die EnOcean-EEP-Profile aus input/EEP_profiles/ (JSON = Semantik +
 Einheiten + Titel, *_test.xml = Bit-Layout + Referenzwerte) und erzeugt daraus

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-EUL22 Verbindungs-/Lasttest (GUI)
+EUL Verbindungs-/Lasttest (GUI)
 
 Oeffnet gleichzeitig eine einstellbare Anzahl X an TCP-Verbindungen zum
-EUL22-Gateway und zeigt pro Verbindung den Status. Damit laesst sich das
+EUL-Gateway und zeigt pro Verbindung den Status. Damit laesst sich das
 Verhalten des TCP-Servers testen - z.B. das Client-Limit (EUL_MAX_CLIENTS,
 Werkseinstellung 4): mehr Verbindungen als erlaubt werden abgewiesen oder
 wieder geschlossen.
@@ -135,7 +135,7 @@ class Conn:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("EUL22 Verbindungs-/Lasttest")
+        self.title("EUL Verbindungs-/Lasttest")
         self.geometry("780x560")
         self.minsize(640, 460)
         self.q = queue.Queue()

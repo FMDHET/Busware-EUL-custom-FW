@@ -6,10 +6,10 @@ das in einer öffentlichen README nichts zu suchen hat.
 
 ## Was ist das Projekt
 
-Custom-Firmware für die **Busware EUL22** (ESP32-C3 + TCM515 EnOcean-Transceiver).
+Custom-Firmware für die **Busware EUL** (ESP32-C3 + TCM515 EnOcean-Transceiver).
 Ersetzt die Original-Busware-FW durch eine Version mit **WLAN-TCP-Bridge**,
 **Web-Portal** und **CRA-/RED-konformem Sicherheitsmodell**. Ziel-User:
-Eltako-Kollegen und Home-Assistant-Nutzer, die den EUL22 als LAN-Gateway
+Eltako-Kollegen und Home-Assistant-Nutzer, die den EUL als LAN-Gateway
 verwenden wollen.
 
 Die Firmware wurde in einer einzigen langen Session iterativ aufgebaut. Kein
@@ -125,28 +125,32 @@ und dann funktioniert alles ohne weiteres Zutun.
 
 ## Build-Workflow
 
-### ⚠️ Whitespace im Pfad
-ESP-IDF's Build-System kann **nicht** mit Leerzeichen im Projektpfad umgehen.
-Das User-Repo liegt unter `/Users/falkthumm/VS Code/busware-eul-custom-fw/` —
-der Space in `VS Code` blockt jeden `pio run`.
+Entwicklungsumgebung ist **Windows 11** mit PlatformIO. Das Repo liegt unter
+`c:\Users\falkt\Documents\GitHub\FMDHET\Busware-EUL-custom-FW` — kein
+Leerzeichen im Pfad, also kein Shadow-Ordner nötig.
 
-**Lösung**: Wir arbeiten mit einem rsync-Shadow-Ordner:
 ```bash
-rsync -a --delete \
-  --exclude='.pio' --exclude='.git' --exclude='.vscode/ipch' \
-  --exclude='web/node_modules' --exclude='web/package-lock.json' \
-  "/Users/falkthumm/VS Code/busware-eul-custom-fw/" \
-  ~/eul22-fw-build/
-cd ~/eul22-fw-build && pio run -t upload
+# aus dem Repo-Root, Git Bash
+~/.platformio/penv/Scripts/pio.exe run              # bauen
+~/.platformio/penv/Scripts/pio.exe run -t upload    # per USB flashen
 ```
 
-Der Shadow-Ordner `~/eul22-fw-build/` bleibt zwischen Builds bestehen. `.pio`,
-`node_modules` etc. werden NICHT geziped/rüber-synced, damit Cache erhalten
-bleibt.
+`idf.py` und `pio` liegen **nicht** im PATH, `~/.platformio/` ist aber
+vollständig installiert (ESP-IDF-Framework + RISC-V-Toolchain).
 
-Wenn der User in Zukunft das Repo an einen space-freien Pfad umzieht, erübrigt
-sich das. Alternativ könnte ein kleines `deploy.sh` im Repo den Ablauf
-kapseln.
+OTA-Update ohne Kabel (Details im [Wiki](https://github.com/FMDHET/Busware-EUL-custom-FW/wiki/Authentifizierung)):
+```bash
+curl -H "Authorization: Bearer <ota-token>" \
+     --data-binary @.pio/build/busware-eul/firmware.bin http://<ip>/api/ota
+```
+
+### ⚠️ sdkconfig-Gotcha
+Es gibt ein generiertes `sdkconfig.busware-eul` (nicht in git). ESP-IDF-Kconfig
+zieht `sdkconfig.defaults` **nur** für Keys, die dort noch nicht stehen. Ein
+`CONFIG_*` in `sdkconfig.defaults` zu ändern bleibt also **wirkungslos**,
+solange derselbe Key im generierten `sdkconfig.busware-eul` steht — dort
+ebenfalls anpassen (oder die Datei löschen und neu erzeugen lassen). Der
+effektive Wert steht in `.pio/build/busware-eul/config/sdkconfig.h`.
 
 ### Erster Build braucht Downloads
 - ESP-IDF-Toolchain (~500 MB)

@@ -44,6 +44,7 @@ typedef struct {
     int64_t              connected_at_us;
     uint64_t             rx_bytes;   // Bytes von diesem Client empfangen
     uint64_t             tx_bytes;   // Bytes an diesen Client gesendet
+    uint64_t             tx_dropped; // verworfen, weil der TX-Puffer voll war
     uint32_t             rx_frames;  // vollstaendige ESP3-Frames von diesem Client
 } client_slot_t;
 
@@ -148,14 +149,16 @@ static void close_slot_locked(client_slot_t *c)
     if (c->cleaned) return;
     c->cleaned = true;
     ESP_LOGI(TAG, "client %s disconnected", c->peer);
-    console_logf("-- %s disconnected (rx=%llu tx=%llu frames=%u)",
+    console_logf("-- %s disconnected (rx=%llu tx=%llu frames=%u drop=%llu)",
                  c->peer,
                  (unsigned long long)c->rx_bytes,
                  (unsigned long long)c->tx_bytes,
-                 (unsigned)c->rx_frames);
-    EVT_INFO("tcp", "Client %s getrennt (rx=%llu tx=%llu frames=%u)",
+                 (unsigned)c->rx_frames,
+                 (unsigned long long)c->tx_dropped);
+    EVT_INFO("tcp", "Client %s getrennt (rx=%llu tx=%llu frames=%u verworfen=%llu)",
              c->peer, (unsigned long long)c->rx_bytes,
-             (unsigned long long)c->tx_bytes, (unsigned)c->rx_frames);
+             (unsigned long long)c->tx_bytes, (unsigned)c->rx_frames,
+             (unsigned long long)c->tx_dropped);
     if (c->sock >= 0) { shutdown(c->sock, SHUT_RDWR); close(c->sock); c->sock = -1; }
     if (c->tx)        { vStreamBufferDelete(c->tx);   c->tx = NULL; }
     c->active = false;
@@ -195,7 +198,7 @@ static int read_line(int sock, char *buf, size_t buf_size, int timeout_ms)
 
 static bool do_auth_handshake(int sock, uint32_t ip_be)
 {
-    static const char BANNER[] = "HELLO EUL22 v1 AUTH-REQUIRED\n";
+    static const char BANNER[] = "HELLO EUL v1 AUTH-REQUIRED\n";
     if (send(sock, BANNER, sizeof(BANNER) - 1, 0) < 0) return false;
 
     char line[128];
@@ -435,19 +438,41 @@ esp_err_t tcp_server_start(uint16_t port, bool auth_required, const char *token)
     memset(s_rl,      0, sizeof(s_rl));
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) s_clients[i].sock = -1;
 
-    xTaskCreate(accept_task, "eul-tcp-acc", 5120, NULL, 9, NULL);
+    if (xTaskCreate(accept_task, "eul-tcp-acc", 5120, NULL, 9, NULL) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
+}
+
+void tcp_server_set_token(const char *token)
+{
+    // Wird nach dem Neu-Erzeugen des Tokens im Portal aufgerufen. Ohne das
+    // bliebe bis zum Neustart der ALTE Token gueltig und der neue wuerde
+    // abgewiesen - genau das Gegenteil dessen, was ein "Token sperren" soll.
+    if (!token) return;
+    snprintf(s_token, sizeof(s_token), "%s", token);
 }
 
 void tcp_server_broadcast(const uint8_t *data, size_t len)
 {
     if (!data || len == 0) return;
+    // Ohne tcp_server_start() existiert der Mutex nicht (Provisioning-Modus oder
+    // tcp_enabled=0). Der UART-RX-Fanout ruft uns aber in JEDEM Modus - ohne
+    // diese Pruefung liefe xSemaphoreTake(NULL) in ein configASSERT -> Panic.
+    if (!s_slots_mtx) return;
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
         client_slot_t *c = &s_clients[i];
         // Nur an authentifizierte Clients senden - der Handshake laeuft jetzt
         // im RX-Task, ein Slot kann also kurzzeitig unauthed aktiv sein.
         if (!c->active || !c->authed || !c->tx) continue;
+        // Nur senden, wenn die Portion KOMPLETT passt. Ein Teil-Write wuerde
+        // den ESP3-Strom des Clients mitten im Frame abschneiden und seinen
+        // Parser desynchronisieren - ein sauberer Aussetzer ist besser.
+        if (xStreamBufferSpacesAvailable(c->tx) < len) {
+            c->tx_dropped += len;
+            continue;
+        }
         (void)xStreamBufferSend(c->tx, data, len, 0);
     }
     xSemaphoreGive(s_slots_mtx);
@@ -456,6 +481,7 @@ void tcp_server_broadcast(const uint8_t *data, size_t len)
 int tcp_server_active_clients(void)
 {
     int n = 0;
+    if (!s_slots_mtx) return 0;
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     for (int i = 0; i < CONFIG_EUL_MAX_CLIENTS; i++) {
         if (s_clients[i].active && s_clients[i].authed) n++;
@@ -470,6 +496,9 @@ int tcp_server_dump_clients_json(char *out, size_t out_size)
     size_t p = 0;
     out[p++] = '[';
 
+    // Server nicht gestartet -> leeres Array statt NULL-Mutex-Panic.
+    if (!s_slots_mtx) { out[p++] = ']'; out[p] = '\0'; return (int)p; }
+
     int64_t now = esp_timer_get_time();
     xSemaphoreTake(s_slots_mtx, portMAX_DELAY);
     bool first = true;
@@ -482,12 +511,14 @@ int tcp_server_dump_clients_json(char *out, size_t out_size)
         }
         first = false;
         int n = snprintf(out + p, out_size - p,
-            "{\"peer\":\"%s\",\"connected_ms\":%lld,\"rx_bytes\":%llu,\"tx_bytes\":%llu,\"rx_frames\":%u}",
+            "{\"peer\":\"%s\",\"connected_ms\":%lld,\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
+            "\"rx_frames\":%u,\"tx_dropped\":%llu}",
             c->peer,
             (long long)((now - c->connected_at_us) / 1000),
             (unsigned long long)c->rx_bytes,
             (unsigned long long)c->tx_bytes,
-            (unsigned)c->rx_frames);
+            (unsigned)c->rx_frames,
+            (unsigned long long)c->tx_dropped);
         if (n < 0 || (size_t)n >= out_size - p) break;
         p += (size_t)n;
     }

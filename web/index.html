@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>EUL22 Konfiguration</title>
+<title>EUL Konfiguration</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -318,7 +318,7 @@ a { color:var(--brand); }
 <body>
 
 <header>
-  <h1>Busware EUL22</h1>
+  <h1>Busware EUL</h1>
   <div class="status" id="status">lade...</div>
 </header>
 
@@ -345,10 +345,10 @@ a { color:var(--brand); }
     <fieldset><legend>Aktive Verbindungen</legend>
       <table class="responsive">
         <thead>
-          <tr><th>Peer</th><th>Uptime</th><th>RX</th><th>TX</th><th>Frames</th></tr>
+          <tr><th>Peer</th><th>Uptime</th><th>RX</th><th>TX</th><th>Frames</th><th>Verworfen</th></tr>
         </thead>
         <tbody id="cli_body">
-          <tr><td colspan="5" class="hint">keine aktiven Verbindungen</td></tr>
+          <tr><td colspan="6" class="hint">keine aktiven Verbindungen</td></tr>
         </tbody>
       </table>
     </fieldset>
@@ -407,7 +407,7 @@ a { color:var(--brand); }
         <button type="button" class="ghost" id="btn-ota">Hochladen &amp; Update</button>
       </div>
       <div class="progress" id="ota_bar_wrap"><div id="ota_bar"></div></div>
-      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul22/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
+      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
       <hr>
       <label>OTA-Token <span class="hint">(erlaubt NUR Firmware-Updates, kein Portal-Zugriff)</span></label>
       <div class="row">
@@ -473,7 +473,7 @@ a { color:var(--brand); }
         <div id="token" class="secret"></div>
         <button type="button" class="ghost" id="btn-regen">Neu erzeugen</button>
       </div>
-      <div class="hint">Handshake: Server sendet <code>HELLO EUL22 v1 AUTH-REQUIRED</code>, Client antwortet mit <code>AUTH &lt;token&gt;</code>.</div>
+      <div class="hint">Handshake: Server sendet <code>HELLO EUL v1 AUTH-REQUIRED</code>, Client antwortet mit <code>AUTH &lt;token&gt;</code>.</div>
       <hr>
       <button type="button" class="ghost" id="btn-preset-ha">Preset: HA-Eltako Integration</button>
       <div class="hint">Setzt Port 5100 + Auth aus (MGW-LAN-Konvention der <a href="https://github.com/FMDHET/home-assistant-eltako" target="_blank" rel="noopener">Eltako HA-Integration</a>).</div>

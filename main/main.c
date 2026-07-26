@@ -1,4 +1,4 @@
-// Busware EUL22 - Custom Firmware
+// Busware EUL - Custom Firmware
 //
 // Ein Gateway zum TCM515 (EnOcean) mit zwei Betriebsmodi, die parallel aktiv
 // sein koennen und im Portal umschaltbar sind:
@@ -50,7 +50,7 @@ static void heartbeat_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Busware EUL22 - custom firmware boot");
+    ESP_LOGI(TAG, "Busware EUL - custom firmware boot");
     led_init();
     xTaskCreate(heartbeat_task, "eul-hb", 1536, NULL, 3, NULL);
     ESP_ERROR_CHECK(mode_mgr_start());

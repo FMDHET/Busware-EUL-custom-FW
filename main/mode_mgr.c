@@ -42,9 +42,12 @@ static const char *TAG = "eul-mgr";
 static void on_uart_rx(const uint8_t *data, size_t len, void *user)
 {
     (void)user;
-    usb_cdc_gateway_broadcast(data, len);
+    // Reihenfolge bewusst: erst die nicht-blockierenden Senken. Der
+    // USB-Broadcast kann warten muessen (kein Host liest) und wuerde sonst die
+    // UART-RX-Task ausbremsen -> ueberlaufender UART-Ring -> Frame-Verlust.
     tcp_server_broadcast(data, len);
     telemetry_feed_rx(data, len);   // ESP3-Parser fuer /api/telegrams
+    usb_cdc_gateway_broadcast(data, len);
 }
 
 // -----------------------------------------------------------------------------
@@ -60,7 +63,14 @@ static void reboot_task(void *arg)
 
 void mode_mgr_schedule_reboot(int delay_ms)
 {
-    xTaskCreate(reboot_task, "eul-reboot", 2048, (void *)(intptr_t)delay_ms, 3, NULL);
+    if (xTaskCreate(reboot_task, "eul-reboot", 2048,
+                    (void *)(intptr_t)delay_ms, 3, NULL) != pdPASS) {
+        // Kein RAM fuer den Task: lieber sofort neu starten als gar nicht.
+        // Nach einem Werksreset liefe das Geraet sonst mit geloeschtem NVS
+        // weiter und der Nutzer waere ausgesperrt.
+        ESP_LOGE(TAG, "reboot task failed - restarting immediately");
+        esp_restart();
+    }
 }
 
 // Baut aus dem (freien) Geraetenamen einen gueltigen mDNS-Hostnamen:
@@ -98,7 +108,7 @@ static void mdns_up(uint16_t tcp_port, bool tcp_enabled, const char *device_name
     if (mdns_init() != ESP_OK) return;
     mdns_hostname_set(host);
     mdns_instance_name_set((device_name && device_name[0]) ? device_name
-                                                           : "Busware EUL22 EnOcean Gateway");
+                                                           : "Busware EUL EnOcean Gateway");
     if (tcp_enabled) {
         mdns_service_add(NULL, "_enocean", "_tcp", tcp_port, NULL, 0);
         mdns_txt_item_t txt[] = {
@@ -123,7 +133,7 @@ static void prov_beacon_task(void *arg)
     // die Credentials rausschreiben, damit man sie zuverlaessig faengt egal
     // wann der Serial-Monitor gestartet wird.
     while (1) {
-        printf("\n=== EUL22 Provisioning ===\n");
+        printf("\n=== EUL Provisioning ===\n");
         printf("SoftAP SSID : %s-%s\n",
                CONFIG_EUL_AP_SSID_PREFIX, config_device_suffix());
         printf("SoftAP Pass : %s\n", s_prov_cfg.ap_pass);
@@ -173,6 +183,10 @@ static void time_sync_start(const char *server, const char *tz)
 // -----------------------------------------------------------------------------
 static int s_ka_sock = -1;
 
+// Laeuft in einer EIGENEN Task, nicht im esp_timer-Callback: der Tick macht
+// blockierende Dinge (sendto, WiFi-Lock fuer RSSI, Mutex der Client-Liste,
+// Logging). Im Timer-Callback wuerde das die gemeinsame esp_timer-Task
+// aufhalten - und damit ausgerechnet den WLAN-Reconnect-Timer verzoegern.
 static void net_tick(void *arg)
 {
     (void)arg;
@@ -200,7 +214,7 @@ static void net_tick(void *arg)
             .sin_port = htons(9),                    // discard-Port
             .sin_addr.s_addr = dst,
         };
-        static const char ka[] = "EUL22-keepalive";
+        static const char ka[] = "EUL-keepalive";
         sendto(s_ka_sock, ka, sizeof(ka) - 1, 0, (struct sockaddr *)&a, sizeof(a));
     }
     if (++cnt >= 24) {  // alle ~120s (Tick 5s) Netz-Status ins Event-Log
@@ -211,6 +225,15 @@ static void net_tick(void *arg)
                  rssi, wifi_sta_ip_str() ? wifi_sta_ip_str() : "-",
                  tcp_server_active_clients(),
                  (unsigned)esp_get_free_heap_size());
+    }
+}
+
+static void net_tick_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        net_tick(NULL);
     }
 }
 
@@ -252,19 +275,26 @@ static void run_normal(const eul_config_t *cfg)
     mdns_up(cfg->tcp_port, cfg->tcp_enabled, cfg->device_name);
     time_sync_start(cfg->ntp_server, cfg->tz);
 
+    // Ab hier KEIN ESP_ERROR_CHECK mehr: ein fehlgeschlagener Teildienst darf
+    // nicht das ganze Geraet in einen Reboot-Loop schicken. Lieber degradiert
+    // weiterlaufen (z.B. Portal ohne TCP-Bridge) und den Fehler protokollieren.
     if (cfg->tcp_enabled) {
-        ESP_ERROR_CHECK(tcp_server_start(cfg->tcp_port,
-                                          cfg->tcp_auth_required,
-                                          cfg->tcp_token));
+        esp_err_t e = tcp_server_start(cfg->tcp_port, cfg->tcp_auth_required,
+                                       cfg->tcp_token);
+        if (e != ESP_OK) EVT_ERR("tcp", "TCP-Bridge nicht gestartet (%s)", esp_err_to_name(e));
     }
 
     // HTTP-Portal auch im Normalmodus verfuegbar (mit Basic Auth), damit man
     // ohne Factory-Reset umkonfigurieren kann.
-    ESP_ERROR_CHECK(http_portal_start(false));
+    {
+        esp_err_t e = http_portal_start(false);
+        if (e != ESP_OK) EVT_ERR("http", "Portal nicht gestartet (%s)", esp_err_to_name(e));
+    }
 
     // USB CDC bewusst zuletzt: sobald aktiv, wird esp_log stumm geschaltet.
     if (cfg->usb_enabled) {
-        ESP_ERROR_CHECK(usb_cdc_gateway_start());
+        esp_err_t e = usb_cdc_gateway_start();
+        if (e != ESP_OK) EVT_ERR("usb", "USB-Bridge nicht gestartet (%s)", esp_err_to_name(e));
     }
 
     ESP_LOGI(TAG, "gateway up - ip=%s tcp=%s(auth=%s) usb=%s heap=%u",
@@ -274,10 +304,7 @@ static void run_normal(const eul_config_t *cfg)
              cfg->usb_enabled ? "on"  : "off",
              (unsigned)esp_get_free_heap_size());
 
-    const esp_timer_create_args_t net_ta = { .callback = net_tick, .name = "eul-net" };
-    esp_timer_handle_t net_th;
-    if (esp_timer_create(&net_ta, &net_th) == ESP_OK)
-        esp_timer_start_periodic(net_th, 5ULL * 1000000ULL);   // 5s Keepalive
+    xTaskCreate(net_tick_task, "eul-net", 3072, NULL, 4, NULL);
 }
 
 esp_err_t mode_mgr_start(void)
@@ -296,7 +323,7 @@ esp_err_t mode_mgr_start(void)
     console_log_init();
     event_log_init();
     telemetry_init();
-    EVT_INFO("boot", "Busware EUL22 v%s build %d (%s) gestartet",
+    EVT_INFO("boot", "Busware EUL v%s build %d (%s) gestartet",
              EUL_FW_VERSION, EUL_FW_BUILD, EUL_FW_GIT);
 
     // Grund des vorigen Neustarts protokollieren - so ist im Event-Log

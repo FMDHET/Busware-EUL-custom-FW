@@ -1,10 +1,24 @@
-# Busware EUL22 — Custom Firmware
+# Busware EUL — Custom Firmware
 
-Ein WLAN-fähiges EnOcean-Gateway auf Basis der [Busware EUL22](https://busware.de/tiki-index.php?page=EUL) Hardware. Verbindet den TCM515-Transceiver via TCP mit Home Assistant, ESPHome, FHEM oder eigenen Tools — mit Live-Monitoring-Webportal, Multi-Client-Support und CRA-konformem Sicherheitsmodell.
+> ## 🔌 Passend für den **[Busware EUL](https://busware.de/tiki-index.php?page=EUL)**
+>
+> Diese Firmware ist **ausschließlich** für den EnOcean-Stick **EUL** von
+> Busware gebaut — ESP32-C3FH4 mit TCM515-Transceiver, USB-C und
+> SMA-Antennenanschluss. Auf anderer Hardware läuft sie nicht (feste
+> GPIO-Belegung, TCM515-Turbo-Mode).
+>
+> **Hardware bestellen und Datenblatt:
+> <https://busware.de/tiki-index.php?page=EUL>**
+
+Ein WLAN-fähiges EnOcean-Gateway auf Basis der
+[Busware-EUL](https://busware.de/tiki-index.php?page=EUL)-Hardware. Verbindet den
+TCM515-Transceiver via TCP mit Home Assistant, ESPHome, FHEM oder eigenen Tools
+— mit Live-Monitoring-Webportal, Multi-Client-Support und CRA-konformem
+Sicherheitsmodell.
 
 ## Highlights
 
-- **Multi-Client TCP-Bridge** zum TCM515: bis zu 4 gleichzeitige Verbindungen, RX-Broadcast an alle, TX über Frame-Level-Mutex serialisiert (keine ESP3-Frame-Verschränkung)
+- **Multi-Client TCP-Bridge** zum TCM515: bis zu 3 gleichzeitige Verbindungen, RX-Broadcast an alle, TX über Frame-Level-Mutex serialisiert (keine ESP3-Frame-Verschränkung)
 - **Optionale USB-CDC-Bridge** parallel zur TCP-Bridge (per Portal umschaltbar)
 - **Web-Portal in TypeScript**: WiFi-Setup, Modi-Konfiguration, Live-Verbindungs-Tabelle, TCM-Statistik, Hex-Konsole mit Live-Datenverkehr
 - **SoftAP-Provisioning bei Erstboot** mit Captive-Portal (kein Login-Prompt-Sucherei), pro Gerät zufällig generierte Credentials
@@ -14,7 +28,7 @@ Ein WLAN-fähiges EnOcean-Gateway auf Basis der [Busware EUL22](https://busware.
 
 ## Hardware
 
-Zielplattform: **Busware EUL22** — ESP32-C3FH4 + TCM515 EnOcean-Transceiver auf einer Platine mit USB-C und SMA-Antennenanschluss.
+Zielplattform: **Busware EUL** — ESP32-C3FH4 + TCM515 EnOcean-Transceiver auf einer Platine mit USB-C und SMA-Antennenanschluss.
 
 ### GPIO-Belegung
 
@@ -39,7 +53,7 @@ Abgeleitet aus drei Quellen synthetisiert (Tasmota-Template, [tostmann/busware-e
 
 - [PlatformIO Core](https://platformio.org/install/cli) (getestet mit Version 6.x, ESP-IDF 5.5.3)
 - Node.js ≥ 20 (`brew install node` auf macOS) — für das TypeScript-Portal-Build
-- Ein Busware EUL22 mit USB-C-Kabel
+- Ein Busware EUL mit USB-C-Kabel
 
 ### Build & Flash
 
@@ -59,10 +73,10 @@ Der PlatformIO-Extra-Script `scripts/prebuild_web.py` startet automatisch `npm i
 ### Erstboot & Konfiguration
 
 1. Board über USB-C anschließen. Beim ersten Boot geht es in den Provisioning-Modus.
-2. Am Handy/Laptop mit dem WLAN `EUL22-Config-XXXXXX` verbinden (letzten 6 Zeichen der MAC). Das WPA2-Passwort erscheint auf dem seriellen Log — auch alle 5 s im Provisioning-Beacon:
+2. Am Handy/Laptop mit dem WLAN `EUL-Config-XXXXXX` verbinden (letzten 6 Zeichen der MAC). Das WPA2-Passwort erscheint auf dem seriellen Log — auch alle 5 s im Provisioning-Beacon:
    ```
-   === EUL22 Provisioning ===
-   SoftAP SSID : EUL22-Config-D3A768
+   === EUL Provisioning ===
+   SoftAP SSID : EUL-Config-D3A768
    SoftAP Pass : DjZd7VpCSGkM
    Portal-URL  : http://192.168.4.1/
    Admin User  : admin
@@ -134,7 +148,7 @@ Was noch offen ist (bewusst außerhalb des Software-Scopes):
 │ Provisioning     │                                │ Normal             │
 │ ──────────────   │                                │ ─────────────────  │
 │ SoftAP APSTA     │                                │ WiFi STA + mDNS    │
-│ WPA2 pro-Geraet  │                                │ ─────────────────  │
+│ WPA2 pro-Gerät  │                                │ ─────────────────  │
 │ Captive DNS      │                                │ TCP-Server         │
 │ HTTP-Portal      │                                │  (+ Token-Auth,    │
 │ http://192.168.  │                                │     Rate-Limit)    │

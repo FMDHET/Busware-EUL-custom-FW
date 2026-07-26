@@ -65,7 +65,7 @@ static bool check_basic_auth(httpd_req_t *req, const eul_config_t *cfg)
     sec_event("portal_auth_fail", "wrong basic auth");
 deny:
     httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"EUL22\"");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"EUL\"");
     httpd_resp_sendstr(req, "auth required");
     return false;
 }
@@ -73,7 +73,11 @@ deny:
 static bool require_auth(httpd_req_t *req)
 {
     eul_config_t cfg;
-    if (config_load(&cfg) != ESP_OK) return false;
+    if (config_load(&cfg) != ESP_OK) {
+        // Ohne Antwort haenge der Client bis zum Socket-Timeout.
+        httpd_resp_send_500(req);
+        return false;
+    }
     return check_basic_auth(req, &cfg);
 }
 
@@ -254,6 +258,34 @@ static esp_err_t h_config(httpd_req_t *req)
         return ESP_OK;
     }
 
+    // Stringlaengen gegen die NVS-Feldgroessen pruefen. Ohne das landet ein zu
+    // langer Wert zwar im NVS, wird beim naechsten config_load aber als leer
+    // gelesen - ein zu langes WLAN-Passwort wuerde das Geraet so beim naechsten
+    // Boot kommentarlos in den AP-Modus zurueckfallen lassen.
+    static const struct { const char *key; size_t max; } LIMITS[] = {
+        { "wifi_ssid",   EUL_WIFI_SSID_MAX  - 1 },
+        { "wifi_pass",   EUL_WIFI_PASS_MAX  - 1 },
+        { "device_name", EUL_DEV_NAME_MAX   - 1 },
+        { "admin_user",  EUL_ADMIN_USER_MAX - 1 },
+        { "admin_pass",  EUL_ADMIN_PASS_MAX - 1 },
+        { "ntp_server",  EUL_NTP_MAX        - 1 },
+        { "tz",          EUL_TZ_MAX         - 1 },
+        { "ip_addr", 15 }, { "ip_gw", 15 }, { "ip_mask", 15 }, { "ip_dns", 15 },
+    };
+    for (size_t i = 0; i < sizeof(LIMITS) / sizeof(LIMITS[0]); i++) {
+        const cJSON *it = cJSON_GetObjectItem(j, LIMITS[i].key);
+        if (it && cJSON_IsString(it) && it->valuestring &&
+            strlen(it->valuestring) > LIMITS[i].max) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s ist zu lang (max. %u Zeichen)",
+                     LIMITS[i].key, (unsigned)LIMITS[i].max);
+            cJSON_Delete(j);
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, msg);
+            return ESP_OK;
+        }
+    }
+
     // WiFi-Credentials NUR paarweise und NUR wenn wirklich neue Werte
     // geliefert wurden. Sonst bleiben SSID und PW im NVS unangetastet.
     bool ssid_set = ssid && cJSON_IsString(ssid) && ssid->valuestring && ssid->valuestring[0];
@@ -334,6 +366,9 @@ static esp_err_t h_regen_token(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
+    // Laufende TCP-Bridge sofort auf den neuen Token umstellen, sonst bliebe
+    // der alte bis zum Neustart gueltig.
+    tcp_server_set_token(tok);
     char reply[128];
     snprintf(reply, sizeof(reply), "{\"token\":\"%s\"}", tok);
     httpd_resp_set_type(req, "application/json");
@@ -731,10 +766,20 @@ static esp_err_t h_ota(httpd_req_t *req)
 
     int remaining = (int)req->content_len;
     bool ok = true;
+    // Ein Client, der Content-Length ankuendigt aber nichts sendet, wuerde die
+    // (einzige) HTTP-Server-Task sonst ENDLOS blockieren - das Portal waere bis
+    // zum Power-Cycle tot. Darum: Leerlauf-Timeouts zaehlen und nach 60 s ohne
+    // ein einziges Byte abbrechen.
+    const int MAX_IDLE = 12;                  // 12 x recv_wait_timeout (5 s)
+    int idle = 0;
     while (remaining > 0) {
         int r = httpd_req_recv(req, buf, remaining < 4096 ? remaining : 4096);
-        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;   // langsamer Upload -> weiter warten
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {    // langsamer Upload -> begrenzt warten
+            if (++idle >= MAX_IDLE) { ok = false; break; }
+            continue;
+        }
         if (r <= 0) { ok = false; break; }
+        idle = 0;                              // Fortschritt -> Zaehler zuruecksetzen
         if (esp_ota_write(ota, buf, r) != ESP_OK) { ok = false; break; }
         remaining -= r;
     }

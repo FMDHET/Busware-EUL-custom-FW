@@ -1,4 +1,4 @@
-menu "Busware EUL22 Gateway"
+menu "Busware EUL Gateway"
 
     config EUL_DEFAULT_TCP_PORT
         int "Default TCP server port (Werkseinstellung)"
@@ -29,7 +29,7 @@ menu "Busware EUL22 Gateway"
 
     config EUL_AP_SSID_PREFIX
         string "SoftAP SSID prefix (wird um MAC-suffix ergaenzt)"
-        default "EUL22-Config"
+        default "EUL-Config"
 
     config EUL_AUTH_TCP_TIMEOUT_MS
         int "Timeout fuer TCP-AUTH Handshake (ms)"

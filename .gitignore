@@ -14,7 +14,7 @@
 build/
 sdkconfig
 sdkconfig.old
-sdkconfig.busware-eul22
+sdkconfig.busware-eul
 dependencies.lock
 managed_components/
 

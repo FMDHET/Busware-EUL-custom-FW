@@ -1,5 +1,5 @@
 @echo off
-rem Startet beide EUL22-Diagnose-Tools (Verbindungs-Monitor + Lasttest).
+rem Startet beide EUL-Diagnose-Tools (Verbindungs-Monitor + Lasttest).
 rem Doppelklick genuegt. Ermittelt den echten pythonw.exe-Pfad ueber den
 rem py-Launcher (umgeht den haengenden Windows-Store-Alias "pythonw" und
 rem vermeidet Konsolenfenster).
