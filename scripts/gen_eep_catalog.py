@@ -371,6 +371,35 @@ def derive_linear(points, label, sc):
     return {"sb": start, "w": width, "lo": [r0, p0], "hi": [r1, p1]}
 
 
+# Versorgungsspannung im 4BS-Bereich ist laut EnOcean-Spec immer 0..5.0 V bzw.
+# 0..5.1 V (8 Bit auf DB3). Bei einem Teil der Zertifikats-XMLs steht im
+# <Value>-Feld aber der 10-fache Wert (50/51 statt 5.0/5.1) -- vermutlich in
+# 0,1-V-Schritten notiert. Der 2-Punkt-Fit uebernimmt das ungeprueft, wodurch
+# z.B. A5-08-01 ein FBH55-Telegramm mit DB3=0x93 als 29,4 V statt 2,94 V
+# anzeigte. Die Quell-XMLs liegen nicht im Repo (input/ ist gitignored), daher
+# korrigieren wir hier nachtraeglich anhand der Spec-Obergrenze.
+SUPPLY_V_LABELS = {"Versorgungsspannung", "Supply voltage", "Supply Voltage"}
+SUPPLY_V_MAX = 10.0  # V -- alles darueber ist fuer 4BS-SVC physikalisch unmoeglich
+
+
+def fix_supply_voltage(fld):
+    """Zehnerpotenz-Fehler in Versorgungsspannungs-Feldern korrigieren.
+
+    Rueckgabe: True, wenn korrigiert wurde (fuer die Statistik).
+    """
+    if fld.get("u") != "V" or fld.get("k") not in SUPPLY_V_LABELS:
+        return False
+    span = max(abs(fld["lo"][1]), abs(fld["hi"][1]))
+    if span <= SUPPLY_V_MAX:
+        return False
+    factor = 1.0
+    while span / factor > SUPPLY_V_MAX:
+        factor *= 10.0
+    fld["lo"][1] = round(fld["lo"][1] / factor, 4)
+    fld["hi"][1] = round(fld["hi"][1] / factor, 4)
+    return True
+
+
 def main():
     if not os.path.isdir(IN_DIR):
         print(f"[eep] input dir not found: {IN_DIR}", file=sys.stderr)
@@ -379,7 +408,7 @@ def main():
     jsons = sorted(glob.glob(os.path.join(IN_DIR, "*.json")))
     catalog = {}
     stats = {"profiles": 0, "with_xml": 0, "lin_fields": 0,
-             "lin_dropped": 0, "titles": 0}
+             "lin_dropped": 0, "titles": 0, "v_fixed": 0}
     dropped = defaultdict(list)
 
     for jpath in jsons:
@@ -411,6 +440,8 @@ def main():
                     unit = units.get(norm(label)) or units.get(norm(sc))
                     if unit:
                         fld["u"] = unit
+                    if fix_supply_voltage(fld):
+                        stats["v_fixed"] += 1
                     lin.append(fld)
                     stats["lin_fields"] += 1
                 else:
@@ -439,7 +470,7 @@ def main():
 
     print(f"[eep] profiles={stats['profiles']} with_xml={stats['with_xml']} "
           f"titles={stats['titles']} lin_fields={stats['lin_fields']} "
-          f"lin_dropped={stats['lin_dropped']}")
+          f"lin_dropped={stats['lin_dropped']} v_fixed={stats['v_fixed']}")
     print(f"[eep] wrote {os.path.relpath(OUT_TS, ROOT)} "
           f"({os.path.getsize(OUT_TS)/1024:.1f} KB, {len(catalog)} entries)")
     # Ein paar Beispiele der abgelehnten Felder zeigen (Transparenz).
