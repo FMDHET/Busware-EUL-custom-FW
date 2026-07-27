@@ -25,6 +25,10 @@ managed_components/
 main/version.h
 .build_number
 
+# Python-Bytecode (tools/, scripts/)
+__pycache__/
+*.py[cod]
+
 # OS
 .DS_Store
 Thumbs.db
