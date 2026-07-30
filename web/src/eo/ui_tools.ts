@@ -1,5 +1,5 @@
-// Reiter "Werkzeuge": Telegramm senden, EEP-Prüfer, PCT14, Gerätekatalog,
-// Datenbestand sichern/laden.
+// Reiter "Werkzeuge" (Telegramm senden, EEP-Prüfer) und "PCT14"
+// (Import/Export, Gerätekatalog, Datenbestand sichern/laden).
 //
 // Portierung von eo_man/view/send_message_window.py, eep_checker_window.py,
 // device_info_window.py und den PCT14-Menüpunkten aus menu_presenter.py.
@@ -432,8 +432,8 @@ export function initToolsTab(): void {
     eoApp.onDevicesChanged(renderTemplates);
 }
 
-/** Reiter "Import/Export": PCT14, Gerätekatalog, Sicherung. */
-export function initImportTab(): void {
+/** Reiter "PCT14": Import/Export, Gerätekatalog, Sicherung. */
+export function initPct14Tab(): void {
     byId('pct14_import')?.addEventListener('click', () => void onPct14Import());
     byId('pct14_extend')?.addEventListener('click', () => void onPct14Extend());
 

@@ -154,7 +154,7 @@ ob Sender-IDs eindeutig und im gültigen Bereich 1–127 liegen.
 | **Telegramm senden** | RPS/1BS/4BS bauen, farbig zerlegter ESP3-Frame, Vorlagen, Dauersenden mit Pause/Anzahl (nutzt `/api/send`, braucht die REST-API) |
 | **EEP-Prüfer** | Rohdaten nach einem gewählten EEP in physikalische Werte umrechnen |
 
-### Reiter „Import/Export"
+### Reiter „PCT14"
 
 | Abschnitt | Zweck |
 |---|---|
