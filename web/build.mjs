@@ -20,6 +20,11 @@ const res = await build({
     minify: true,
     target: 'es2020',
     format: 'iife',
+    // Ohne das escapt esbuild jedes Nicht-ASCII-Zeichen zu \xNN. Zur Laufzeit
+    // ist das gleichwertig, macht aber portal_html.h unlesbar: aus "Gerät"
+    // wird "Ger\xE4t", und ein grep nach deutschen Texten findet nichts mehr.
+    // Die Seite liefert ohnehin charset=utf-8 aus.
+    charset: 'utf8',
     write: false,
     logLevel: 'warning',
 });
@@ -33,7 +38,15 @@ const finalHtml = html.replace('<!--SCRIPT-->', `<script>${js}</script>`);
 // index.html sonst \r\n; ein zurueckbleibendes \r landet im C-String und wird
 // vom Compiler als Zeilenende gewertet -> "missing terminating character".
 const cLines = finalHtml.split(/\r\n|\r|\n/).map((line) => {
-    const esc = line.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const esc = line
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        // Trigraphs: "??" gefolgt von =/(/)//'<>!- deutet der C-Compiler als
+        // Sonderzeichen und bricht mit -Werror=trigraphs ab. Minifiziertes JS
+        // erzeugt solche Folgen laufend (`a??!b`, `x?.y??"z"`). Ein "\?" ist
+        // ein gueltiges C-Escape fuer "?" und verhindert die Erkennung - wir
+        // escapen pauschal jedes Fragezeichen statt Sonderfaelle zu jagen.
+        .replace(/\?/g, '\\?');
     return `"${esc}\\n"`;
 });
 

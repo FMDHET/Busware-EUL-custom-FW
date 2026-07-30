@@ -4,7 +4,12 @@
 // eingebettet und dann als C-String in main/portal_html.h abgelegt.
 
 import { EEP_CATALOG } from './eep_catalog';
-import { ELTAKO_DEVICES } from './eltako_devices';
+import { eoApp } from './eo/app';
+import { describeTelegram, eepFromTeachIn4bs } from './eo/eep_decode';
+import { initDevicesTab, renderTable as renderDeviceList } from './eo/ui_devices';
+import { initHaTab, syncHaGateway } from './eo/ui_ha';
+import { initPct14Tab, initToolsTab, updateStorageInfo } from './eo/ui_tools';
+import { SEGMENT_COLORS, type FrameSegmentKind } from './eo/telegram';
 
 // -----------------------------------------------------------------------------
 // Types (spiegeln HTTP-Backend)
@@ -60,6 +65,9 @@ interface Stats {
     rssi: number;
     uptime_ms: number;
     epoch_ms: number;
+    fs_total: number;   // SPIFFS gesamt (Geraete-Inventar)
+    fs_used: number;    // SPIFFS belegt
+    eo_bytes: number;   // Groesse des gespeicherten Geraete-Dokuments
     heap_free: number;
     heap_max: number;
 }
@@ -139,7 +147,9 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 // Tabs
 // -----------------------------------------------------------------------------
-type TabName = 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean' | 'geraete' | 'api' | 'events' | 'konsole';
+type TabName =
+    | 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean'
+    | 'geraete' | 'ha' | 'werkzeuge' | 'pct14' | 'api' | 'events' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -151,6 +161,25 @@ function activateTab(name: TabName): void {
     if (location.hash !== `#${name}`) {
         history.replaceState(null, '', `#${name}`);
     }
+    // Der HA-Reiter zeigt Base-ID/Host/Port des EnOcean-Reiters. Beim
+    // Hereinwechseln neu uebernehmen, damit z.B. ein gerade geaenderter Port
+    // dort sofort richtig steht.
+    if (name === 'ha') syncHaGateway();
+}
+
+// Die Reiterleiste klebt unter der Kopfzeile. Deren Hoehe haengt vom
+// Geraetenamen und der Fensterbreite ab (Umbruch), deshalb wird sie gemessen
+// statt geraten und als CSS-Variable bereitgestellt.
+function trackHeaderHeight(): void {
+    const header = document.querySelector<HTMLElement>('header');
+    if (!header) return;
+    const apply = () => {
+        document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
+    };
+    apply();
+    // Deckt auch das Umbrechen der Ueberschrift ab, das ein reines
+    // resize-Event auf dem Fenster nicht zuverlaessig meldet.
+    new ResizeObserver(apply).observe(header);
 }
 
 function activeTabName(): string {
@@ -363,6 +392,11 @@ let adminDisplay: SecretDisplay;
 let apiTokenDisplay: SecretDisplay;
 let otaTokenDisplay: SecretDisplay;
 
+// Fuer /api/send aus dem Werkzeuge-Reiter: der Geraete-Token gilt nur, wenn
+// die REST-API auch eingeschaltet ist.
+let apiToken = '';
+let apiEnabled = false;
+
 async function loadState(): Promise<void> {
     try {
         const s = await api.state();
@@ -391,6 +425,8 @@ async function loadState(): Promise<void> {
         // Browser-Tab-Titel ebenfalls auf den vergebenen Geraetenamen setzen
         // (nicht nur die Ueberschrift). Ohne Namen bleibt der statische <title>.
         if (s.device_name) document.title = s.device_name;
+        apiToken = s.tcp_token;
+        apiEnabled = s.api_enabled;
         renderApiDoc(s.tcp_token, s.api_enabled);
         if (!s.tcp_auth_required && s.tcp_enabled) renderHAYaml();
         say(`Modus: ${s.mode} · MAC-Suffix ${s.suffix}`);
@@ -404,7 +440,7 @@ async function doScan(): Promise<void> {
     try {
         const arr = await api.scan();
         const sel = byId<HTMLSelectElement>('ssid_sel');
-        sel.innerHTML = '<option value="">-- Netzwerk waehlen --</option>';
+        sel.innerHTML = '<option value="">— Netzwerk wählen —</option>';
         arr.forEach((n) => {
             const opt = document.createElement('option');
             opt.value = n.ssid;
@@ -449,6 +485,7 @@ async function doReadBaseId(): Promise<void> {
     try {
         const r = await api.baseIdRead();
         byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        publishBaseId();
         out.textContent = r.writes_remaining !== undefined
             ? `Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
             : `Base-ID: ${r.base_id}`;
@@ -472,6 +509,7 @@ async function doWriteBaseId(): Promise<void> {
     try {
         const r = await api.baseIdWrite(val);
         byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        publishBaseId();
         out.textContent = r.writes_remaining !== undefined
             ? `Neue Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
             : `Neue Base-ID: ${r.base_id}`;
@@ -492,6 +530,9 @@ function applyHAPreset(): void {
 function renderHAYaml(): void {
     const host = currentHost();
     const port = parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100;
+    // Die tatsaechlich gelesene Base-ID einsetzen. Frueher stand hier ein
+    // Platzhalter, der sich vom erzeugten Block im HA-Reiter unterschied.
+    const base = byId<HTMLInputElement>('baseid_in').value.trim().toUpperCase();
     const yaml =
         'eltako:\n' +
         '  gateway:\n' +
@@ -499,9 +540,23 @@ function renderHAYaml(): void {
         '      device_type: eul_lan\n' +
         `      serial_path: ${host}\n` +
         `      port: ${port}\n` +
-        '      base_id: FF-AA-00-00     # anpassen: base_id des TCM515\n';
+        (base
+            ? `      base_id: ${base}\n`
+            : '      base_id: FF-AA-00-00     # noch nicht gelesen - Knopf „Lesen" oben\n');
     byId('ha_yaml').textContent = yaml;
     byId('ha_yaml_box').style.display = 'block';
+}
+
+// Die Base-ID des TCM515 ist die einzige Quelle fuer alles, was mit
+// Sender-Adressen rechnet: HA-Export, Telegramm-Sender, PCT14. Sie wird hier
+// im EnOcean-Reiter gepflegt und von dort in den Geraete-Manager gespiegelt.
+function publishBaseId(): void {
+    const v = byId<HTMLInputElement>('baseid_in').value.trim().toUpperCase();
+    if (v === eoApp.doc.baseId) return;
+    eoApp.doc.baseId = v;
+    eoApp.touch();
+    syncHaGateway();
+    if (byId('ha_yaml_box').style.display !== 'none') renderHAYaml();
 }
 
 function renderApiDoc(token: string, enabled: boolean): void {
@@ -541,18 +596,18 @@ async function doSave(): Promise<void> {
         body.wifi_ssid = s;
         body.wifi_pass = p;
     } else if (s || p) {
-        if (!confirm('WLAN-Zugang bleibt unveraendert (nur SSID oder Passwort eingetragen). Fortfahren?')) return;
+        if (!confirm('WLAN-Zugang bleibt unverändert (nur SSID oder Passwort eingetragen). Fortfahren?')) return;
     }
     try {
         await api.save(body);
-        say('gespeichert — Neustart noetig fuer WLAN/TCP/Name/Zeitzone');
+        say('gespeichert — Neustart nötig für WLAN/TCP/Name/Zeitzone');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
 async function doReboot(): Promise<void> {
-    if (!confirm('Geraet jetzt neu starten? Die Verbindung wird kurz getrennt.')) return;
+    if (!confirm('Gerät jetzt neu starten? Die Verbindung wird kurz getrennt.')) return;
     try {
         await api.reboot();
         say('Neustart ausgeloest ...');
@@ -569,7 +624,7 @@ async function waitForDeviceBack(prog: HTMLElement): Promise<void> {
     await new Promise((r) => setTimeout(r, 3000));
     while (Date.now() - t0 < 120000) {
         const sec = Math.round((Date.now() - t0) / 1000);
-        prog.textContent = `Geraet startet neu ... warte auf Wiederverbindung (${sec}s)`;
+        prog.textContent = `Gerät startet neu ... warte auf Wiederverbindung (${sec}s)`;
         try {
             const ctl = new AbortController();
             const to = setTimeout(() => ctl.abort(), 1500);
@@ -583,14 +638,14 @@ async function waitForDeviceBack(prog: HTMLElement): Promise<void> {
         } catch { /* noch nicht erreichbar -> weiter pollen */ }
         await new Promise((r) => setTimeout(r, 1500));
     }
-    prog.textContent = 'Geraet meldet sich nicht zurueck — Seite bitte manuell neu laden.';
+    prog.textContent = 'Gerät meldet sich nicht zurück — Seite bitte manuell neu laden.';
 }
 
 function doOtaUpload(): void {
     const input = byId<HTMLInputElement>('ota_file');
     const file = input.files && input.files[0];
-    if (!file) { say('Bitte zuerst eine .bin-Datei waehlen'); return; }
-    if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Geraet startet danach neu.`)) return;
+    if (!file) { say('Bitte zuerst eine .bin-Datei wählen'); return; }
+    if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Gerät startet danach neu.`)) return;
 
     const prog = byId('ota_progress');
     const wrap = byId('ota_bar_wrap');
@@ -622,7 +677,7 @@ function doOtaUpload(): void {
     xhr.upload.onload = () => {
         bar.style.width = '100%';
         wrap.classList.add('indet');
-        prog.textContent = 'Upload fertig — Geraet prueft und aktiviert das Image ...';
+        prog.textContent = 'Upload fertig — Gerät prüft und aktiviert das Image ...';
     };
     xhr.onload = () => {
         wrap.classList.remove('indet');
@@ -648,7 +703,7 @@ function doOtaUpload(): void {
 }
 
 async function doFactoryReset(): Promise<void> {
-    if (!confirm('Wirklich auf Werkseinstellungen zuruecksetzen? Alle Zugangsdaten werden neu erzeugt.')) return;
+    if (!confirm('Wirklich auf Werkseinstellungen zurücksetzen? Alle Zugangsdaten werden neu erzeugt.')) return;
     try {
         await api.factoryReset();
         say('reset · neustart');
@@ -703,9 +758,12 @@ function rssiQuality(r: number): string {
 }
 
 async function pollStats(): Promise<void> {
-    if (activeTabName() !== 'status') return;
+    // Der PCT14-Reiter zeigt die Speicherbelegung aus derselben Antwort.
+    const tab = activeTabName();
+    if (tab !== 'status' && tab !== 'pct14') return;
     try {
         const s = await api.stats();
+        updateStorageInfo(s.fs_total, s.fs_used, s.eo_bytes);
         // Zeit-Basis fuer Telegramm-Zeitstempel (0 solange SNTP nicht sync).
         if (s.epoch_ms > 1_700_000_000_000) bootEpochMs = s.epoch_ms - s.uptime_ms;
         const clock = s.epoch_ms > 1_700_000_000_000
@@ -718,7 +776,7 @@ async function pollStats(): Promise<void> {
             `Uptime        : ${fmtUptime(s.uptime_ms)}\n` +
             `Aktive Clients: ${s.clients}\n` +
             `Freier Heap   : ${fmtBytes(s.heap_free)}\n` +
-            `Groesster Block: ${fmtBytes(s.heap_max)}`;
+            `Größter Block : ${fmtBytes(s.heap_max)}`;
         byId('stats').textContent =
             `RX vom TCM515 : ${fmtBytes(s.tcm_rx_bytes)} / ${s.tcm_rx_frames} Frames\n` +
             `TX an TCM515  : ${fmtBytes(s.tcm_tx_bytes)} / ${s.tcm_tx_frames} Frames`;
@@ -751,147 +809,25 @@ const ESP3_TYPES: Record<number, string> = {
     0x0a: '802.15.4', 0x0b: 'Command 2.4',
 };
 
-// Absender (EnOcean-ID) -> EEP-String. Wird aus A5-Lerntelegrammen automatisch
-// gelernt und/oder manuell im Portal zugeordnet; in localStorage persistiert.
-const DEV_EEP_KEY = 'eul_dev_eep';
-const DEV_NAME_KEY = 'eul_dev_name';
-const DEV_MODEL_KEY = 'eul_dev_model';
-let deviceEep: Record<string, string> = loadMap(DEV_EEP_KEY);
-// Absender -> frei vergebener Klartext-Name (erscheint hinter der Absender-ID).
-let deviceName: Record<string, string> = loadMap(DEV_NAME_KEY);
-// Absender -> ausgewähltes Eltako-Modell (setzt das EEP automatisch).
-let deviceModel: Record<string, string> = loadMap(DEV_MODEL_KEY);
-// Alle bisher gesehenen Absender (fuer die Zuordnungs-Tabelle), sender -> rorg.
-const seenSenders = new Map<string, number>();
-
-function loadMap(key: string): Record<string, string> {
-    try {
-        const raw = localStorage.getItem(key);
-        return raw ? (JSON.parse(raw) as Record<string, string>) : {};
-    } catch {
-        return {};
-    }
-}
-
-function saveMap(key: string, m: Record<string, string>): void {
-    try {
-        localStorage.setItem(key, JSON.stringify(m));
-    } catch {
-        /* localStorage evtl. deaktiviert - dann nur fuer diese Sitzung */
-    }
-}
-
-function saveDeviceEep(): void {
-    saveMap(DEV_EEP_KEY, deviceEep);
-}
-
-// w Bits ab globalem Bit-Offset sb (MSB-first) aus dem Payload lesen.
-function extractBits(payload: number[], sb: number, w: number): number | null {
-    let val = 0;
-    for (let i = 0; i < w; i++) {
-        const p = sb + i;
-        const bi = p >> 3;
-        if (bi >= payload.length) return null;
-        val = (val << 1) | ((payload[bi] >> (7 - (p & 7))) & 1);
-    }
-    return val >>> 0;
-}
-
-// Zahl fuer die Anzeige runden (max. 2 Nachkommastellen, keine Nachkomma-Nullen).
-function fmtNum(x: number): string {
-    return (Math.round(x * 100) / 100).toString();
-}
-
-// Datentelegramm anhand eines bekannten EEP dekodieren: liefert die
-// zusammengesetzte "Bedeutung" der linearen Felder oder '' wenn nichts passt.
-function decodeByEep(eep: string, payload: number[]): string {
-    const entry = EEP_CATALOG[eep];
-    if (!entry || !entry.lin) return '';
-    const parts: string[] = [];
-    for (const f of entry.lin) {
-        const raw = extractBits(payload, f.sb, f.w);
-        if (raw === null) continue;
-        const [r0, p0] = f.lo;
-        const [r1, p1] = f.hi;
-        if (r1 === r0) continue;
-        const phys = p0 + ((raw - r0) * (p1 - p0)) / (r1 - r0);
-        parts.push(`${f.k} ${fmtNum(phys)}${f.u ? ' ' + f.u : ''}`);
-    }
-    return parts.join(' · ');
-}
-
-// Wippen-/Tastenbezeichnung fuer RPS (F6-02-xx).
-const RPS_BUTTONS = ['Wippe A unten', 'Wippe A oben', 'Wippe B unten', 'Wippe B oben', 'Taste 5', 'Taste 6', 'Taste 7', 'Taste 8'];
-
-// RPS (RORG F6): Schalter/Wippe. Status-Bit 5 (0x20) ist T21 und bei
-// PTM-Wippen immer gesetzt; ohne T21 ist die Wippen-Zuordnung nicht belastbar,
-// dann wird nur grob gedeutet. DB0-Bit EB (0x10) = Energiebogen
-// gedrueckt/losgelassen.
-function describeRps(db0: number, status: number): string {
-    const eb = (db0 & 0x10) !== 0;
-    if ((status & 0x20) === 0) return eb ? 'Taste(n) gedrückt' : 'losgelassen';
-    if (!eb && db0 === 0x00) return 'losgelassen';
-    let s = `${RPS_BUTTONS[(db0 >> 5) & 0x07]} ${eb ? 'gedrückt' : 'losgelassen'}`;
-    if (db0 & 0x01) s += ` + ${RPS_BUTTONS[(db0 >> 1) & 0x07]}`; // zweite Aktion
-    return s;
-}
-
-// 1BS (RORG D5): einfacher Kontakt (z.B. Fenster/Tuer).
-function describe1bs(db0: number): string {
-    return db0 & 0x01 ? 'Kontakt geschlossen' : 'Kontakt offen';
-}
-
-// 4BS (RORG A5) generischer Fallback: A5-38-08 Zentralkommando (was dieses
-// Gateway schaltet). d = [DB3, DB2, DB1, DB0]; DB0-Bit 0x08 = Datentelegramm.
-function describe4bs(d: number[]): string {
-    if (d.length !== 4) return '';
-    const db3 = d[0], db2 = d[1], db0 = d[3];
-    if ((db0 & 0x08) === 0) return 'Lerntelegramm';
-    if (db3 === 0x01) return db0 & 0x01 ? 'Einschalten' : 'Ausschalten';
-    if (db3 === 0x02) return `Dimmen auf ${db2}%${db0 & 0x01 ? '' : ' (aus)'}`;
-    return '';
-}
-
-function hex2(n: number): string {
-    return n.toString(16).padStart(2, '0').toUpperCase();
-}
-
-// A5-Lerntelegramm mit EEP auswerten: DB0-Bit3 (0x08)=0 -> Lernen,
-// DB0-Bit7 (0x80)=1 -> EEP (FUNC/TYPE) enthalten. Liefert "A5-FF-TT" oder null.
-function eepFromTeachIn4bs(d: number[]): string | null {
-    if (d.length !== 4) return null;
-    const db3 = d[0], db2 = d[1], db0 = d[3];
-    if ((db0 & 0x08) !== 0) return null; // Datentelegramm
-    if ((db0 & 0x80) === 0) return null; // Lernen ohne EEP -> FUNC/TYPE unbekannt
-    const func = db3 >> 2;
-    const type = ((db3 & 0x03) << 5) | (db2 >> 3);
-    return `A5-${hex2(func)}-${hex2(type)}`;
-}
-
-function describeTelegram(rorg: number, payload: number[], status: number, sender: string): string {
-    // A5-Lerntelegramm: EEP ableiten, Absender automatisch zuordnen (Auto-Learn).
+// Deutung eines empfangenen Telegramms. Die eigentliche Dekodierung liegt in
+// eo/eep_decode.ts (teilt sich der Geraete-Manager mit dem EEP-Pruefer); hier
+// bleibt nur die Anbindung an den Geraetebestand: Lerntelegramme setzen das
+// EEP des Absenders, danach dekodiert der Katalog.
+function describeTelegramForSender(
+    rorg: number,
+    payload: number[],
+    status: number,
+    sender: string,
+): string {
     if (rorg === 0xa5) {
         const learned = eepFromTeachIn4bs(payload);
         if (learned) {
-            if (deviceEep[sender] !== learned) {
-                deviceEep[sender] = learned;
-                saveDeviceEep();
-            }
+            eoApp.learnEep(sender, learned);
             const t = EEP_CATALOG[learned]?.t;
             return `Lerntelegramm ${learned}${t ? ': ' + t : ''}`;
         }
     }
-    // Zugeordnetes EEP (gelernt oder manuell) -> Katalog-Dekodierung bevorzugen.
-    const eep = deviceEep[sender];
-    if (eep) {
-        const dec = decodeByEep(eep, payload);
-        if (dec) return dec;
-    }
-    // Fallback: generische, EEP-freie Interpretation.
-    if (rorg === 0xf6) return describeRps(payload[0] ?? 0, status);
-    if (rorg === 0xd5) return describe1bs(payload[0] ?? 0);
-    if (rorg === 0xa5) return describe4bs(payload);
-    return '';
+    return describeTelegram(rorg, payload, status, eoApp.eepFor(sender));
 }
 
 // Zeitstempel einer Telegramm-Zeile: echte Uhrzeit wenn SNTP-Basis bekannt,
@@ -962,17 +898,23 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const rorgHex = `0x${rorg.toString(16).padStart(2, '0')}`;
     const name = RORG_NAMES[rorg] ? `${RORG_NAMES[rorg]} (${rorgHex})` : rorgHex;
     const senderStr = fmtEnoceanId(sender);
-    if (!seenSenders.has(senderStr)) {
-        seenSenders.set(senderStr, rorg);
+    // Absender in den Geraetebestand aufnehmen bzw. dessen Laufzeitwerte
+    // (Signal, letzte Sichtung) auffrischen. Nur Empfangsrichtung: was WIR
+    // senden, ist kein fremdes Geraet.
+    if (dir === DIR_RX) {
+        // Ohne NTP-Basis die Browser-Uhr nehmen: die Zeile ist hoechstens eine
+        // Poll-Runde alt, das ist genauer als "nie gesehen".
+        eoApp.noteTelegram(senderStr, rorg, dbm, bootEpochMs === null ? Date.now() : bootEpochMs + ms);
     }
     return {
         ms, dir, typ, rorg: name, sender: senderStr, data: toHex(payload),
-        text: describeTelegram(rorg, payload, status, senderStr), dbm, rep, raw: b,
+        text: describeTelegramForSender(rorg, payload, status, senderStr), dbm, rep, raw: b,
     };
 }
 
 // ESP3-Frame feldweise zerlegen (für die aufklappbare Rohframe-Ansicht).
-interface RawField { name: string; hex: string; }
+// Dieselbe Farbcodierung wie im Sende-Werkzeug: gleiche Farbe = gleiches Feld.
+interface RawField { name: string; hex: string; kind: FrameSegmentKind; }
 function hx1(b: number[], i: number): string {
     return i >= 0 && i < b.length ? b[i].toString(16).padStart(2, '0') : '??';
 }
@@ -985,35 +927,35 @@ function esp3Fields(b: number[]): RawField[] {
     const dataLen = (b[1] << 8) | b[2];
     const optLen = b[3];
     const type = b[4];
-    f.push({ name: 'Sync', hex: hx1(b, 0) });
-    f.push({ name: 'Data Length', hex: hxRange(b, 1, 3) });
-    f.push({ name: 'Opt. Length', hex: hx1(b, 3) });
-    f.push({ name: 'Packet Type', hex: hx1(b, 4) });
-    f.push({ name: 'CRC8H', hex: hx1(b, 5) });
+    f.push({ name: 'Sync', hex: hx1(b, 0), kind: 'frame' });
+    f.push({ name: 'Data Length', hex: hxRange(b, 1, 3), kind: 'frame' });
+    f.push({ name: 'Opt. Length', hex: hx1(b, 3), kind: 'frame' });
+    f.push({ name: 'Packet Type', hex: hx1(b, 4), kind: 'frame' });
+    f.push({ name: 'CRC8H', hex: hx1(b, 5), kind: 'crc' });
     const dataStart = 6;
     const dataEnd = 6 + dataLen;
     if (type === 1 && dataLen >= 6) {
-        f.push({ name: 'RORG', hex: hx1(b, dataStart) });
-        f.push({ name: 'Data', hex: hxRange(b, dataStart + 1, dataEnd - 5) });
-        f.push({ name: 'Sender-ID', hex: hxRange(b, dataEnd - 5, dataEnd - 1) });
-        f.push({ name: 'Status', hex: hx1(b, dataEnd - 1) });
+        f.push({ name: 'RORG', hex: hx1(b, dataStart), kind: 'org' });
+        f.push({ name: 'Data', hex: hxRange(b, dataStart + 1, dataEnd - 5), kind: 'data' });
+        f.push({ name: 'Sender-ID', hex: hxRange(b, dataEnd - 5, dataEnd - 1), kind: 'address' });
+        f.push({ name: 'Status', hex: hx1(b, dataEnd - 1), kind: 'status' });
         const os = dataEnd;
-        if (optLen >= 1) f.push({ name: 'SubTelNum', hex: hx1(b, os) });
-        if (optLen >= 5) f.push({ name: 'Destination', hex: hxRange(b, os + 1, os + 5) });
-        if (optLen >= 6) f.push({ name: 'dBm', hex: hx1(b, os + 5) });
-        if (optLen >= 7) f.push({ name: 'Security', hex: hx1(b, os + 6) });
+        if (optLen >= 1) f.push({ name: 'SubTelNum', hex: hx1(b, os), kind: 'optional' });
+        if (optLen >= 5) f.push({ name: 'Destination', hex: hxRange(b, os + 1, os + 5), kind: 'optional' });
+        if (optLen >= 6) f.push({ name: 'dBm', hex: hx1(b, os + 5), kind: 'optional' });
+        if (optLen >= 7) f.push({ name: 'Security', hex: hx1(b, os + 6), kind: 'optional' });
     } else {
-        f.push({ name: 'Data', hex: hxRange(b, dataStart, dataEnd) });
-        if (optLen > 0) f.push({ name: 'Optional', hex: hxRange(b, dataEnd, dataEnd + optLen) });
+        f.push({ name: 'Data', hex: hxRange(b, dataStart, dataEnd), kind: 'data' });
+        if (optLen > 0) f.push({ name: 'Optional', hex: hxRange(b, dataEnd, dataEnd + optLen), kind: 'optional' });
     }
     const crcd = 6 + dataLen + optLen;
-    f.push({ name: 'CRC8D', hex: hx1(b, crcd) });
+    f.push({ name: 'CRC8D', hex: hx1(b, crcd), kind: 'crc' });
     return f;
 }
 
 function renderTelegramRow(t: Telegram): string {
     const dbm = t.dbm === null ? '' : String(t.dbm);
-    const nm = deviceName[t.sender];
+    const nm = eoApp.nameFor(t.sender);
     const senderCell = `<span style="font-family:ui-monospace,monospace">${escapeHtml(t.sender)}</span>` +
         (nm ? ` <b>${escapeHtml(nm)}</b>` : '');
     // Wiederholte Telegramme (über Repeater) markieren: 🔁 + Hop-Anzahl.
@@ -1078,11 +1020,21 @@ function buildTelDetail(frameHex: string): HTMLTableRowElement {
         tr.innerHTML = `<td colspan="${TEL_COLS}" class="hint">Rohframe nicht verfügbar</td>`;
         return tr;
     }
-    const heads = fields.map((f) => `<th>${escapeHtml(f.name)}</th>`).join('');
-    const vals = fields.map((f) => `<td>${escapeHtml(f.hex)}</td>`).join('');
+    const color = (f: RawField) => SEGMENT_COLORS[f.kind];
+    const heads = fields
+        .map((f) => `<th style="color:${color(f)}">${escapeHtml(f.name)}</th>`)
+        .join('');
+    const vals = fields
+        .map((f) => `<td style="color:${color(f)}">${escapeHtml(f.hex)}</td>`)
+        .join('');
+    // Die Rohframe-Zeile in denselben Farben wie die Tabelle darunter - so
+    // sieht man auf einen Blick, welches Byte wozu gehoert.
+    const raw = fields
+        .map((f) => `<span title="${escapeHtml(f.name)}" style="color:${color(f)}">${escapeHtml(f.hex)}</span>`)
+        .join(' ');
     tr.innerHTML =
         `<td colspan="${TEL_COLS}"><div class="rawwrap">` +
-        `<div class="rawhex">${escapeHtml(frameHex)}</div>` +
+        `<div class="rawhex">${raw}</div>` +
         `<table class="rawtbl"><thead><tr>${heads}</tr></thead><tbody><tr>${vals}</tr></tbody></table>` +
         `</div></td>`;
     return tr;
@@ -1096,138 +1048,6 @@ function applyTelegramFilter(): void {
         r.style.display = match ? '' : 'none';
         const nx = r.nextElementSibling as HTMLElement | null;
         if (nx && nx.classList.contains('tel-detail')) nx.style.display = match ? '' : 'none';
-    });
-}
-
-// -----------------------------------------------------------------------------
-// Geraete / EEP-Zuordnung: gesehene Absender mit Auswahl des EEP-Profils.
-// Auto-Learn setzt die Zuordnung aus A5-Lerntelegrammen, manuell ueberschreibbar.
-// -----------------------------------------------------------------------------
-function eepOptionsFor(rorg: number): string[] {
-    const cls = RORG_NAMES[rorg];
-    return Object.keys(EEP_CATALOG)
-        .filter((k) => !cls || EEP_CATALOG[k].cls === cls)
-        .sort();
-}
-
-// RORG-Klasse (RPS/1BS/4BS/VLD) direkt aus dem EEP-String - unabhängig davon,
-// ob das EEP im Katalog vorkommt (einige Eltako-EEPs sind nicht dekodierbar).
-function eepClass(eep: string): string {
-    return RORG_NAMES[parseInt(eep.slice(0, 2), 16)] || '';
-}
-
-function eepSelectHtml(sender: string, rorg: number): string {
-    const cur = deviceEep[sender] || '';
-    const keys = eepOptionsFor(rorg);
-    const opts = ['<option value="">— unbekannt —</option>'];
-    // Zugeordnetes EEP ohne Katalog-Profil trotzdem anzeigen (Konsistenz).
-    if (cur && !keys.includes(cur)) {
-        opts.push(`<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} — (kein Profil im Katalog)</option>`);
-    }
-    for (const k of keys) {
-        opts.push(`<option value="${k}"${k === cur ? ' selected' : ''}>${escapeHtml(k + ' — ' + EEP_CATALOG[k].t)}</option>`);
-    }
-    return `<select data-sender="${escapeHtml(sender)}" class="dev-eep">${opts.join('')}</select>`;
-}
-
-// Eltako-Geräte passend zur RORG-Klasse des Absenders (F6/A5/D5/...).
-function eltakoOptionsFor(rorg: number): typeof ELTAKO_DEVICES {
-    const cls = RORG_NAMES[rorg];
-    return ELTAKO_DEVICES.filter((d) => !cls || eepClass(d.eep) === cls);
-}
-
-function eltakoSelectHtml(sender: string, rorg: number): string {
-    const cur = deviceModel[sender] || '';
-    const opts = ['<option value="">— (nicht zugeordnet) —</option>'];
-    for (const d of eltakoOptionsFor(rorg)) {
-        opts.push(`<option value="${escapeHtml(d.key)}"${d.key === cur ? ' selected' : ''}>${escapeHtml(d.model + ' — ' + d.typ)}</option>`);
-    }
-    return `<select data-sender="${escapeHtml(sender)}" class="dev-eltako">${opts.join('')}</select>`;
-}
-
-// Inkrementell: nur neue Absender anhaengen, vorhandene Zeilen in-place
-// aktualisieren (Selects bei Auto-Learn). So wird das Namensfeld NIE mitten
-// im Tippen durch ein eintreffendes Telegram ueberschrieben.
-function renderDeviceTable(): void {
-    const body = byId('dev_body');
-    if (!body || !seenSenders.size) return;
-    if (body.querySelector('.hint')) body.innerHTML = '';
-
-    // Einfuegereihenfolge (Map) beibehalten -> keine Reflows bestehender Zeilen.
-    for (const [s, rorg] of seenSenders) {
-        let row = body.querySelector<HTMLTableRowElement>(`tr[data-sender="${s}"]`);
-        if (!row) {
-            row = document.createElement('tr');
-            row.setAttribute('data-sender', s);
-            row.innerHTML =
-                `<td data-label="Absender" style="font-family:ui-monospace,monospace">${escapeHtml(s)}</td>` +
-                `<td data-label="Name"><input type="text" class="dev-name" data-sender="${escapeHtml(s)}" maxlength="31" autocomplete="off" placeholder="z.B. Taster Flur" value="${escapeHtml(deviceName[s] || '')}"></td>` +
-                `<td data-label="Eltako Gerät">${eltakoSelectHtml(s, rorg)}</td>` +
-                `<td data-label="EEP-Profil">${eepSelectHtml(s, rorg)}</td>`;
-            body.appendChild(row);
-        } else {
-            // Auto-Learn kann das EEP nachtraeglich setzen -> Selects angleichen,
-            // aber nicht waehrend der Nutzer sie gerade offen hat.
-            const eepSel = row.querySelector<HTMLSelectElement>('select.dev-eep');
-            if (eepSel && document.activeElement !== eepSel && eepSel.value !== (deviceEep[s] || '')) {
-                eepSel.value = deviceEep[s] || '';
-            }
-            const elSel = row.querySelector<HTMLSelectElement>('select.dev-eltako');
-            if (elSel && document.activeElement !== elSel && elSel.value !== (deviceModel[s] || '')) {
-                elSel.value = deviceModel[s] || '';
-            }
-        }
-    }
-}
-
-function initDeviceTable(): void {
-    const body = byId('dev_body');
-    if (!body) return;
-    body.addEventListener('change', (e) => {
-        const t = e.target;
-        if (!(t instanceof HTMLElement)) return;
-        const s = t.getAttribute('data-sender');
-        if (!s) return;
-        const row = t.closest('tr');
-
-        // Eltako-Gerät gewählt -> Modell merken und passendes EEP setzen.
-        if (t instanceof HTMLSelectElement && t.classList.contains('dev-eltako')) {
-            const d = ELTAKO_DEVICES.find((x) => x.key === t.value);
-            if (d) {
-                deviceModel[s] = d.key;
-                deviceEep[s] = d.eep;
-            } else {
-                delete deviceModel[s];
-            }
-            saveMap(DEV_MODEL_KEY, deviceModel);
-            saveDeviceEep();
-            const eepSel = row?.querySelector<HTMLSelectElement>('select.dev-eep');
-            if (eepSel) eepSel.value = deviceEep[s] || '';
-            return;
-        }
-
-        // EEP manuell gewählt -> setzen; passt es nicht zum Modell, Modell lösen.
-        if (t instanceof HTMLSelectElement && t.classList.contains('dev-eep')) {
-            if (t.value) deviceEep[s] = t.value;
-            else delete deviceEep[s];
-            saveDeviceEep();
-            const md = ELTAKO_DEVICES.find((x) => x.key === deviceModel[s]);
-            if (md && md.eep !== t.value) {
-                delete deviceModel[s];
-                saveMap(DEV_MODEL_KEY, deviceModel);
-                const elSel = row?.querySelector<HTMLSelectElement>('select.dev-eltako');
-                if (elSel) elSel.value = '';
-            }
-            return;
-        }
-
-        // Name eingetragen (beim Verlassen des Feldes speichern).
-        if (t instanceof HTMLInputElement && t.classList.contains('dev-name')) {
-            const v = t.value.trim();
-            if (v) deviceName[s] = v;
-            else delete deviceName[s];
-            saveMap(DEV_NAME_KEY, deviceName);
-        }
     });
 }
 
@@ -1246,7 +1066,10 @@ async function pollConsole(): Promise<void> {
 
         // Telegramm-Tabelle (Status) immer fuellen, unabhaengig von der Pause.
         renderTelegramLines(j.lines);
-        renderDeviceTable();
+        // Signal und "Zuletzt gesehen" aendern sich mit jedem Telegramm, loesen
+        // aber bewusst kein Speichern aus - deshalb hier explizit neu zeichnen,
+        // und nur wenn der Reiter auch sichtbar ist.
+        if (tab === 'geraete') renderDeviceList();
 
         // Rohe Konsole nur schreiben, wenn nicht pausiert.
         if (conPaused) return;
@@ -1353,7 +1176,7 @@ function clearConsole(): void {
 function togglePause(): void {
     conPaused = !conPaused;
     byId('btn-pause').textContent = conPaused ? 'Weiter' : 'Pause';
-    say(conPaused ? 'Konsole angehalten' : 'Konsole laeuft');
+    say(conPaused ? 'Konsole angehalten' : 'Konsole läuft');
 }
 
 function wireConsoleKeyboard(): void {
@@ -1383,8 +1206,32 @@ function wireConsoleKeyboard(): void {
 // -----------------------------------------------------------------------------
 // Boot
 // -----------------------------------------------------------------------------
+// Geraete-Manager: erst den Bestand vom Geraet holen, dann die drei Reiter
+// aufbauen. Laeuft parallel zum uebrigen Portal-Start - ein langsamer
+// /api/eo-Request darf Status und Konsole nicht aufhalten.
+async function initEo(): Promise<void> {
+    await eoApp.init({
+        say,
+        host: currentHost,
+        tcpPort: () => parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100,
+        apiToken: () => (apiEnabled ? apiToken : ''),
+    });
+    // Gespeicherte Base-ID ins Eingabefeld des EnOcean-Reiters zuruecklegen:
+    // sie steht dann nach jedem Portal-Aufruf da, ohne den TCM515 erneut
+    // auslesen zu muessen.
+    const baseIn = byId<HTMLInputElement>('baseid_in');
+    if (!baseIn.value && eoApp.doc.baseId) baseIn.value = eoApp.doc.baseId;
+    baseIn.addEventListener('input', publishBaseId);
+
+    initDevicesTab();
+    initHaTab();
+    initToolsTab();
+    initPct14Tab();
+}
+
 function init(): void {
     initTabs();
+    trackHeaderHeight();
     wireEyeToggles();
     tokenDisplay = new SecretDisplay(byId('token'));
     adminDisplay = new SecretDisplay(byId('adminp'));
@@ -1406,7 +1253,7 @@ function init(): void {
     byId('btn-baseid-read').addEventListener('click', doReadBaseId);
     byId('btn-baseid-write').addEventListener('click', doWriteBaseId);
 
-    initDeviceTable();
+    void initEo();
 
     // Telegramm-Filter (Absender/Name/RORG/...).
     const telFilterEl = byId<HTMLInputElement>('tel_filter');

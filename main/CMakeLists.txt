@@ -14,6 +14,7 @@ idf_component_register(
         "console_log.c"
         "event_log.c"
         "telemetry.c"
+        "device_store.c"
         "mode_mgr.c"
     INCLUDE_DIRS
         "."
@@ -29,6 +30,7 @@ idf_component_register(
         esp_hw_support
         esp_timer
         nvs_flash
+        spiffs
         lwip
         freertos
         log

@@ -41,10 +41,17 @@ body {
 }
 
 /* --- Header + Tabs --------------------------------------------------- */
+/* Kopfzeile und Reiterleiste bleiben beim Scrollen stehen. Die Reiter kleben
+   direkt unter der Kopfzeile, deren Hoehe je nach Geraetename ein bis zwei
+   Zeilen betraegt - deshalb wird sie per JS in --header-h gemessen, statt
+   einen festen Wert zu raten. */
 header {
   padding:12px 16px 8px;
   border-bottom:1px solid var(--border);
   background:var(--panel);
+  position:sticky;
+  top:0;
+  z-index:20;
 }
 header h1 { margin:0; font-size:1.2em; }
 header .status { font-size:0.85em; color:var(--hint); margin-top:4px; }
@@ -55,6 +62,9 @@ nav.tabs {
   background:var(--panel);
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
+  position:sticky;
+  top:var(--header-h, 0px);
+  z-index:19;
 }
 nav.tabs::-webkit-scrollbar { display:none; }
 nav.tabs button {
@@ -88,9 +98,73 @@ main {
 .tab.active { display:block; }
 
 /* Geraete-Reiter: Liste nutzt die volle verfuegbare Hoehe. */
-#tab-geraete.tab.active { display:flex; flex-direction:column; min-height:calc(100vh - 170px); }
-#tab-geraete > fieldset { flex:1; display:flex; flex-direction:column; min-height:0; }
-#tab-geraete .devwrap { flex:1; min-height:0; overflow:auto; }
+#tab-geraete .devwrap { max-height:52vh; min-height:180px; overflow:auto; }
+#tab-geraete tbody tr { cursor:pointer; }
+
+/* Zweispaltiges Label/Feld-Raster fuer Detailformular und Filterleiste. */
+.eo-grid {
+  display:grid;
+  grid-template-columns:minmax(120px, 200px) 1fr;
+  gap:6px 10px;
+  align-items:center;
+}
+.eo-grid > label { margin:0; font-size:0.9em; color:var(--hint); }
+.eo-grid > input, .eo-grid > select, .eo-grid > span > input, .eo-grid > span > select { width:100%; }
+@media (max-width:520px) { .eo-grid { grid-template-columns:1fr; gap:2px 0; } }
+
+/* Filterleiste: kompakte, umbrechende Felder. */
+.eo-filter { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+.eo-filter > div { display:flex; flex-direction:column; gap:2px; min-width:140px; }
+.eo-filter label { margin:0; font-size:0.8em; color:var(--hint); }
+
+/* Mehrfachauswahl als Klappliste (siehe web/src/eo/multiselect.ts). Ein
+   natives <select multiple> braucht sichtbare Zeilen und ist bei 200+
+   Eintraegen unbedienbar. */
+.ms { position:relative; }
+.ms-btn {
+  width:100%;
+  text-align:left;
+  font-weight:400;
+  padding:10px 12px;
+  min-height:42px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.ms-btn.ms-active { color:var(--brand); font-weight:600; }
+.ms-panel {
+  position:absolute;
+  z-index:10;
+  top:calc(100% + 4px);
+  left:0;
+  min-width:260px;
+  max-width:min(420px, 90vw);
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+  padding:8px;
+}
+.ms-search { margin-bottom:6px; }
+.ms-list { max-height:260px; overflow-y:auto; }
+.ms-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  padding:5px 4px;
+  font-size:14px;
+  color:var(--fg);
+  border-radius:4px;
+  cursor:pointer;
+}
+.ms-item:hover { background:var(--muted); }
+.ms-item input { margin:0; flex:none; }
+.ms-foot { border-top:1px solid var(--border); margin-top:6px; padding-top:6px; }
+.ms-foot button { width:100%; min-height:32px; padding:6px; font-size:13px; }
+
+/* Farbig zerlegtes Telegramm im Sende-Werkzeug. */
+#tg_frame { font-family:ui-monospace,monospace; font-size:13px; word-break:break-all; line-height:1.8; }
 
 /* Sticky-Header: Ueberschriften bleiben beim Scrollen sichtbar (Desktop;
    im responsiven Modus ist die Kopfzeile ohnehin ausgeblendet). */
@@ -329,6 +403,9 @@ a { color:var(--brand); }
   <button data-tab="usb">USB</button>
   <button data-tab="enocean">EnOcean</button>
   <button data-tab="geraete">Geräte</button>
+  <button data-tab="ha">Home Assistant</button>
+  <button data-tab="werkzeuge">Werkzeuge</button>
+  <button data-tab="pct14">PCT14</button>
   <button data-tab="api">API</button>
   <button data-tab="events">Events</button>
   <button data-tab="konsole">Konsole</button>
@@ -365,7 +442,7 @@ a { color:var(--brand); }
           </tbody>
         </table>
       </div>
-      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Name hinter dem Absender kommt aus dem Reiter <b>Geräte</b>. Zeile anklicken zeigt den <b>ESP3-Rohframe feldweise</b>.</div>
+      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Name hinter dem Absender kommt aus dem Reiter <b>Geräte</b>. Zeile anklicken zeigt den <b>ESP3-Rohframe feldweise</b> — farbcodiert wie im Sende-Werkzeug: <span style="color:#c47f00">RORG</span>, <span style="color:var(--danger)">Daten</span>, <span style="color:#1a7f37">Sender-ID</span>, <span style="color:#0057b7">Status</span>, <span style="color:var(--hint)">Rahmen/CRC/optional</span>.</div>
     </fieldset>
 
     <fieldset><legend>TCM515-Statistik</legend>
@@ -375,8 +452,8 @@ a { color:var(--brand); }
 
   <!-- ========================================================= Allgemein -->
   <section class="tab" id="tab-allgemein">
-    <fieldset><legend>Geraet</legend>
-      <label>Geraetename</label>
+    <fieldset><legend>Gerät</legend>
+      <label>Gerätename</label>
       <input type="text" id="dev_name" maxlength="39" autocomplete="off" placeholder="z.B. EnOcean Gateway Flur">
       <div class="hint">Anzeigename im Portal-Titel und in Home Assistant.</div>
     </fieldset>
@@ -386,9 +463,9 @@ a { color:var(--brand); }
       <input type="text" id="admin_user" maxlength="23" autocomplete="off" placeholder="admin">
       <label>Aktuelles Passwort <span class="hint">(nur beim Erst-Setup sichtbar)</span></label>
       <div id="adminp" class="secret"></div>
-      <label>Neues Passwort <span class="hint">(leer = unveraendert, min. 8 Zeichen)</span></label>
-      <input type="password" id="admin_pass_new" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
-      <div class="hint">Login fuer dieses Portal im Normalbetrieb (STA-Modus).</div>
+      <label>Neues Passwort <span class="hint">(leer = unverändert, min. 8 Zeichen)</span></label>
+      <input type="password" id="admin_pass_new" maxlength="63" placeholder="unverändert" autocomplete="off" data-eye>
+      <div class="hint">Login für dieses Portal im Normalbetrieb (STA-Modus).</div>
     </fieldset>
 
     <fieldset><legend>Zeit (NTP)</legend>
@@ -407,7 +484,7 @@ a { color:var(--brand); }
         <button type="button" class="ghost" id="btn-ota">Hochladen &amp; Update</button>
       </div>
       <div class="progress" id="ota_bar_wrap"><div id="ota_bar"></div></div>
-      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
+      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul/firmware.bin</code>. Das Gerät startet nach erfolgreichem Update automatisch neu.</div>
       <hr>
       <label>OTA-Token <span class="hint">(erlaubt NUR Firmware-Updates, kein Portal-Zugriff)</span></label>
       <div class="row">
@@ -416,7 +493,7 @@ a { color:var(--brand); }
       </div>
       <div class="hint">Damit lassen sich Updates delegieren, ohne das Admin-Passwort weiterzugeben:<br>
         <code>curl -H "Authorization: Bearer &lt;token&gt;" --data-binary @firmware.bin http://&lt;ip&gt;/api/ota</code><br>
-        &bdquo;Neu erzeugen&ldquo; macht den alten Token sofort ungueltig.</div>
+        &bdquo;Neu erzeugen&ldquo; macht den alten Token sofort ungültig.</div>
     </fieldset>
   </section>
 
@@ -425,7 +502,7 @@ a { color:var(--brand); }
     <fieldset><legend>WLAN (Heimnetz)</legend>
       <label>SSID</label>
       <div class="row">
-        <select id="ssid_sel"><option value="">-- Netzwerk waehlen --</option></select>
+        <select id="ssid_sel"><option value="">— Netzwerk wählen —</option></select>
         <button type="button" class="ghost" id="btn-scan">Suchen</button>
       </div>
       <label>oder SSID manuell</label>
@@ -439,7 +516,7 @@ a { color:var(--brand); }
   <section class="tab" id="tab-usb">
     <fieldset><legend>USB-CDC-Bridge</legend>
       <label class="inline"><input type="checkbox" id="usb_en"> USB als transparente ESP3-Bridge aktivieren</label>
-      <div class="hint">Erlaubt Direkt-Zugriff auf den TCM515 ueber die USB-C-Buchse als virtuellen COM-Port. Aus Sicherheitsgruenden (CRA) standardmaessig aus.</div>
+      <div class="hint">Erlaubt Direkt-Zugriff auf den TCM515 über die USB-C-Buchse als virtuellen COM-Port. Aus Sicherheitsgründen (CRA) standardmäßig aus.</div>
     </fieldset>
 
     <fieldset><legend>Hinweis</legend>
@@ -486,18 +563,175 @@ a { color:var(--brand); }
 
   <!-- =========================================================== Geraete -->
   <section class="tab" id="tab-geraete">
-    <fieldset><legend>Bekannte Geräte</legend>
+    <datalist id="eo_types"></datalist>
+    <!-- Zusatzfelder, die die HA-Eltako-Integration je Gerät auswertet.
+         Die Liste ist nur ein Vorschlag - eintragen lässt sich jedes Feld. -->
+    <datalist id="eo_ha_fields">
+      <option value="fast_status_change"></option>
+      <option value="device_class"></option>
+      <option value="invert_signal"></option>
+      <option value="time_closes"></option>
+      <option value="time_opens"></option>
+      <option value="temperature_unit"></option>
+      <option value="min_target_temperature"></option>
+      <option value="max_target_temperature"></option>
+      <option value="cooling_mode"></option>
+      <option value="meter_tariffs"></option>
+      <option value="voc_type_indexes"></option>
+    </datalist>
+
+    <fieldset><legend>Filter</legend>
+      <div class="eo-filter">
+        <div style="min-width:170px">
+          <label for="eo_f_name">Filtername</label>
+          <input type="text" id="eo_f_name" list="eo_f_saved" placeholder="z.B. Erdgeschoss" maxlength="40">
+          <datalist id="eo_f_saved"></datalist>
+        </div>
+        <div style="min-width:auto"><label>&nbsp;</label>
+          <div class="row">
+            <button type="button" class="ghost" id="eo_f_load">Laden</button>
+            <button type="button" class="ghost" id="eo_f_save">Speichern</button>
+            <button type="button" class="ghost" id="eo_f_del">Entfernen</button>
+          </div>
+        </div>
+        <div><label for="eo_f_global">Überall suchen</label>
+          <input type="text" id="eo_f_global" placeholder="Begriffe, kommagetrennt"></div>
+        <div><label for="eo_f_addr">Adresse</label><input type="text" id="eo_f_addr" placeholder="00-00-"></div>
+        <div><label for="eo_f_ext">Externe ID</label><input type="text" id="eo_f_ext" placeholder="FF-AA-"></div>
+        <div><label>Gerätetyp</label><div id="eo_f_type"></div></div>
+        <div><label>EEP</label><div id="eo_f_eep"></div></div>
+        <div style="min-width:auto"><label>&nbsp;</label>
+          <div class="row">
+            <label class="inline"><input type="checkbox" id="eo_f_onlyha"> nur HA</label>
+            <button type="button" class="ghost" id="eo_f_reset">Zurücksetzen</button>
+          </div>
+        </div>
+      </div>
+      <div class="hint">Ein Gerät wird angezeigt, sobald <b>einer</b> der Begriffe passt. Mehrfachauswahl bei Typ/EEP mit Strg bzw. Cmd. Filter lassen sich benannt speichern und werden auf dem Gerät abgelegt.</div>
+    </fieldset>
+
+    <fieldset><legend>Geräte <span id="eo_count" class="hint"></span></legend>
+      <div class="row" style="margin-bottom:6px">
+        <button type="button" class="ghost" id="eo_add">Gerät anlegen</button>
+        <button type="button" class="ghost" id="eo_suggest_all">Vorschläge zurücksetzen</button>
+        <button type="button" class="danger" id="eo_clear">Bestand löschen</button>
+      </div>
       <div class="devwrap">
         <table class="responsive">
-          <thead>
-            <tr><th>Absender</th><th>Name</th><th>Eltako Gerät</th><th>EEP-Profil</th></tr>
-          </thead>
-          <tbody id="dev_body">
-            <tr><td colspan="4" class="hint">noch keine Absender gesehen</td></tr>
-          </tbody>
+          <thead id="eo_thead"></thead>
+          <tbody id="eo_tbody"></tbody>
         </table>
       </div>
-      <div class="hint">Jeder empfangene Absender wird hier automatisch eingetragen. <b>Name</b> frei vergeben (erscheint im Status hinter dem Absender). <b>Eltako Gerät</b> wählen setzt automatisch das passende <b>EEP-Profil</b>; das EEP wird auch aus A5-Lerntelegrammen gelernt und bestimmt die „Bedeutung“-Dekodierung. Alles nur im Browser gespeichert.</div>
+      <div class="hint">Jeder empfangene Absender wird automatisch eingetragen; das EEP wird aus A5-Lerntelegrammen gelernt. Zeile anklicken öffnet die Details.</div>
+    </fieldset>
+
+    <fieldset><legend>Gerätedetails</legend>
+      <div id="eo_details"></div>
+    </fieldset>
+  </section>
+
+  <!-- ==================================================== Home Assistant -->
+  <section class="tab" id="tab-ha">
+    <fieldset><legend>Gateway</legend>
+      <div class="eo-grid">
+        <label for="ha_gw_type">Gateway-Typ</label><select id="ha_gw_type"></select>
+        <label for="ha_gw_base">Base-ID</label>
+        <input type="text" id="ha_gw_base" placeholder="im Reiter EnOcean lesen" maxlength="11">
+      </div>
+      <div class="eo-grid" id="ha_gw_host_row" style="margin-top:6px">
+        <label for="ha_gw_host">Hostname / IP</label><input type="text" id="ha_gw_host">
+      </div>
+      <div class="eo-grid" id="ha_gw_port_row">
+        <label for="ha_gw_port">Port</label><input type="number" id="ha_gw_port" min="1" max="65535">
+      </div>
+      <div class="eo-grid">
+        <label for="ha_gw_comment">Kommentar</label><input type="text" id="ha_gw_comment" maxlength="80">
+      </div>
+      <div class="hint" id="ha_gw_note"></div>
+    </fieldset>
+
+    <fieldset><legend>Prüfung</legend>
+      <div id="ha_check"></div>
+    </fieldset>
+
+    <fieldset><legend>configuration.yaml</legend>
+      <div class="row" style="margin-bottom:6px">
+        <button type="button" id="ha_generate">Erzeugen</button>
+        <button type="button" class="ghost" id="ha_copy">Kopieren</button>
+        <button type="button" class="ghost" id="ha_download">Herunterladen</button>
+      </div>
+      <div id="ha_warn" class="hint"></div>
+      <pre id="ha_out" class="mono" style="white-space:pre;overflow:auto;max-height:60vh;font-size:12px;padding:10px">noch nichts erzeugt</pre>
+      <div class="hint">Block in die <code>configuration.yaml</code> übernehmen und Home Assistant neu laden. Exportiert werden alle Geräte mit <b>In HA verwenden</b>.</div>
+    </fieldset>
+  </section>
+
+  <!-- ========================================================= Werkzeuge -->
+  <section class="tab" id="tab-werkzeuge">
+    <fieldset><legend>Telegramm senden</legend>
+      <div class="eo-grid">
+        <label for="tg_type">Typ</label><select id="tg_type"></select>
+        <label for="tg_data">Daten (hex)</label><input type="text" id="tg_data" value="01 00 00 09" maxlength="20">
+        <label for="tg_sender">Sender-ID</label><input type="text" id="tg_sender" placeholder="FF-AA-00-01" maxlength="11">
+        <label for="tg_status">Status</label><input type="text" id="tg_status" value="00" maxlength="2">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="inline"><input type="checkbox" id="tg_repeat"> wiederholt senden</label>
+        <label class="inline">Pause (ms) <input type="number" id="tg_delay" value="100" min="10" style="width:90px"></label>
+        <label class="inline">Anzahl <input type="number" id="tg_count" value="-1" style="width:90px"></label>
+      </div>
+      <label style="margin-top:8px">ESP3-Frame <span id="tg_len" class="hint"></span></label>
+      <div id="tg_frame"></div>
+      <div class="row" style="margin-top:8px">
+        <button type="button" id="tg_send">Senden</button>
+        <input type="text" id="tg_fav_name" placeholder="Name der Vorlage" maxlength="40">
+        <button type="button" class="ghost" id="tg_fav_add">Als Vorlage speichern</button>
+      </div>
+      <label style="margin-top:10px">Vorlagen</label>
+      <div id="tg_favs"></div>
+      <div class="hint">Senden nutzt <code>/api/send</code> und braucht daher die aktivierte <b>REST-API</b>. Anzahl <code>-1</code> = endlos (Knopf wird zum Stopp). Farben: <span style="color:#c47f00">RORG</span>, <span style="color:var(--danger)">Daten</span>, <span style="color:#1a7f37">Sender-ID</span>, <span style="color:#0057b7">Status</span>.</div>
+    </fieldset>
+
+    <fieldset><legend>EEP-Prüfer</legend>
+      <div class="eo-grid">
+        <label for="eep_sel">EEP</label><select id="eep_sel"></select>
+        <label for="eep_data">Datenbytes (hex)</label><input type="text" id="eep_data" maxlength="24">
+      </div>
+      <div class="hint" id="eep_cls"></div>
+      <div id="eep_out" style="margin-top:8px"></div>
+      <div class="hint">Rechnet Rohdaten nach dem gewählten Profil in physikalische Werte um — nützlich, um ein vermutetes EEP gegen ein mitgeschnittenes Telegramm zu prüfen.</div>
+    </fieldset>
+
+  </section>
+
+  <!-- ============================================================= PCT14 -->
+  <section class="tab" id="tab-pct14">
+    <fieldset><legend>PCT14</legend>
+      <div class="row">
+        <button type="button" class="ghost" id="pct14_import">Export einlesen…</button>
+        <button type="button" class="ghost" id="pct14_extend">Export um HA-Sender ergänzen…</button>
+      </div>
+      <div id="pct14_log" style="margin-top:8px"></div>
+      <div class="hint"><b>Einlesen</b> übernimmt Adressen, Typen, Beschreibungen und die Speicherbelegung einer Baureihe-14-Anlage aus einem PCT14-XML-Export — der EUL kann den RS485-Bus nicht selbst auslesen. <b>Ergänzen</b> schreibt die im Portal vergebenen HA-Sender-IDs in eine Kopie des Exports, die in PCT14 wieder eingelesen werden kann.</div>
+    </fieldset>
+
+    <fieldset><legend>Gerätekatalog <span id="cat_count" class="hint"></span></legend>
+      <input type="text" id="cat_search" placeholder="Suchen nach Typ, EEP, Plattform…">
+      <div style="max-height:50vh;overflow:auto;margin-top:6px">
+        <table class="responsive">
+          <thead><tr><th>Typ</th><th>Hersteller</th><th>EEP</th><th>Sender-EEP</th><th>Plattform</th><th>Kanäle</th><th>PCT14</th><th>Beschreibung</th></tr></thead>
+          <tbody id="cat_body"></tbody>
+        </table>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>Datenbestand</legend>
+      <div class="row">
+        <button type="button" class="ghost" id="eo_backup">Sicherung herunterladen</button>
+        <button type="button" class="ghost" id="eo_restore">Sicherung einspielen…</button>
+      </div>
+      <div class="hint" id="eo_storage" style="margin-top:8px"></div>
+      <div class="hint">Geräte, Filter und Vorlagen liegen als eine JSON-Datei auf dem Gerät und sind daher aus jedem Browser gleich sichtbar. Ein Werksreset löscht sie mit.</div>
     </fieldset>
   </section>
 
@@ -505,13 +739,13 @@ a { color:var(--brand); }
   <section class="tab" id="tab-api">
     <fieldset><legend>REST-API</legend>
       <label class="inline"><input type="checkbox" id="api_en"> REST-API aktivieren</label>
-      <div class="hint">HTTP-Zugriff auf empfangene Telegramme und zum Senden. Authentifizierung ueber den Geraete-Token, per Header <code>Authorization: Bearer &lt;token&gt;</code> oder Query <code>?token=&lt;token&gt;</code>.</div>
-      <label>Geraete-Token</label>
+      <div class="hint">HTTP-Zugriff auf empfangene Telegramme und zum Senden. Authentifizierung über den Geräte-Token, per Header <code>Authorization: Bearer &lt;token&gt;</code> oder Query <code>?token=&lt;token&gt;</code>.</div>
+      <label>Geräte-Token</label>
       <div class="row">
         <div id="api_token" class="secret"></div>
         <button type="button" class="ghost" id="btn-regen2">Neu erzeugen</button>
       </div>
-      <div class="hint">Derselbe Token wie fuer die TCP-Bridge (Reiter EnOcean).</div>
+      <div class="hint">Derselbe Token wie für die TCP-Bridge (Reiter EnOcean).</div>
     </fieldset>
 
     <fieldset><legend>Endpunkte</legend>

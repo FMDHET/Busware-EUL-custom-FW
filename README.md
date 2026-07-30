@@ -112,6 +112,75 @@ eltako:
 
 **Mit Token-Auth** (empfohlen wenn andere Geräte im Netz stehen): TCP-Auth im Portal aktiviert lassen. Auf HA-Seite braucht es dann eine kleine Wrapper-Komponente, die den `HELLO`/`AUTH <token>`-Handshake vor dem ESP3-Traffic spricht — die Standard-`eltako`-Integration unterstützt das nicht direkt.
 
+## Geräte-Manager
+
+Das Portal enthält einen Geräte-Manager im Stil des Desktop-Tools
+[grimmpp/enocean-device-manager](https://github.com/grimmpp/enocean-device-manager) —
+direkt im Browser, ohne Python-Installation. Der komplette Datenbestand
+(Geräte, Filter, Telegramm-Vorlagen) liegt als **eine JSON-Datei auf dem
+Gerät** (SPIFFS, `storage`-Partition) und ist daher aus jedem Browser gleich
+sichtbar.
+
+### Reiter „Geräte"
+
+- Jeder empfangene Absender wird automatisch aufgenommen; das EEP wird aus
+  A5-Lerntelegrammen gelernt
+- Detailformular mit Name, Typ, EEP, Tastenfunktion, Kommentar, HA-Plattform
+  und den HA-Zusatzfeldern (`sender`, `device_class`, `time_opens`,
+  `meter_tariffs`, `thermostat`, …)
+- **Vorschlag aus Katalog** setzt EEP, Plattform und Zusatzfelder anhand des
+  Gerätetyps — Katalog aus dem EO-Man-Projekt plus die ~200 Eltako-Funkmodelle
+  aus dem EEP-Navigator
+- Beliebige HA-Zusatzfelder pro Gerät ergänzbar (`fast_status_change`,
+  `invert_signal`, `cooling_mode`, …), mit Vorschlagsliste der gängigen Felder
+- EEP-Auswahl umfasst neben den 163 offiziellen Profilen auch die
+  Eltako-eigenen `M5-38-08` (Schaltaktor-Rückmeldung), `G5-3F-7F` und
+  `H5-3F-7F` (Rollladen) — die stehen nicht in der EnOcean-Spezifikation,
+  werden von der HA-Eltako-Integration aber vorausgesetzt
+- Benannte, speicherbare Filter (global / Adresse / Externe ID / Typ / EEP),
+  sortierbare Spalten, Signalstärke und „zuletzt gesehen" je Gerät
+
+### Reiter „Home Assistant"
+
+Erzeugt den kompletten `configuration.yaml`-Block für die Eltako-Integration:
+Gateway-Abschnitt, Geräte nach Plattform gruppiert, Sender-IDs mit
+Base-ID-Offset verrechnet, verknüpfte Geräte als Kommentar. Vorab wird geprüft,
+ob Sender-IDs eindeutig und im gültigen Bereich 1–127 liegen.
+
+### Reiter „Werkzeuge"
+
+| Werkzeug | Zweck |
+|---|---|
+| **Telegramm senden** | RPS/1BS/4BS bauen, farbig zerlegter ESP3-Frame, Vorlagen, Dauersenden mit Pause/Anzahl (nutzt `/api/send`, braucht die REST-API) |
+| **EEP-Prüfer** | Rohdaten nach einem gewählten EEP in physikalische Werte umrechnen |
+
+### Reiter „PCT14"
+
+| Abschnitt | Zweck |
+|---|---|
+| **PCT14** | Export einlesen (Adressen, Typen, Beschreibungen, Speicherbelegung einer Baureihe-14-Anlage) bzw. einen Export um die HA-Sender-IDs ergänzen |
+| **Gerätekatalog** | Durchsuchbare Liste aller bekannten Typen mit EEP, Plattform und PCT14-Funktionsgruppe |
+| **Datenbestand** | Sicherung als JSON herunterladen / einspielen, Speicherbelegung |
+
+> **Kein Bus-Scan.** Das Desktop-Tool liest Geräte über einen FAM14 direkt aus
+> dem RS485-Bus. Der EUL hat nur den TCM515-Funktransceiver und keinen
+> Bus-Zugang — dieselben Daten kommen hier über den **PCT14-Import**. Ebenso
+> entfallen Bus-Burst-Test und die Erkennung fremder ESP2-Gateways.
+
+### HTTP-Endpunkte
+
+Alle drei mit Basic-Auth (wie das übrige Portal), nicht mit dem API-Token:
+
+```bash
+curl -u admin:<pw> http://<ip>/api/eo                    # Bestand lesen
+curl -u admin:<pw> -X POST --data-binary @backup.json \
+     -H 'Content-Type: application/json' http://<ip>/api/eo   # ersetzen (max. 128 KB)
+curl -u admin:<pw> -X POST http://<ip>/api/eo/clear      # löschen
+```
+
+Geschrieben wird über eine Temp-Datei mit anschließendem `rename` — ein
+abgebrochener Upload lässt den alten Bestand unangetastet.
+
 ## Sicherheit (CRA / RED)
 
 Was in dieser Firmware bereits umgesetzt ist:
@@ -182,7 +251,28 @@ Was noch offen ist (bewusst außerhalb des Software-Scopes):
 | [`esp3_parser.c`](main/esp3_parser.c) | ESP3-Frame-Parser (CRC8H, CRC8D nach EnOcean-Spec) |
 | [`usb_cdc_gateway.c`](main/usb_cdc_gateway.c) | USB-Serial/JTAG Bridge zum TCM515 |
 | [`console_log.c`](main/console_log.c) | Ring-Buffer für Web-Konsole (Live-Datenverkehr) |
+| [`device_store.c`](main/device_store.c) | SPIFFS-Ablage des Geräte-Manager-Dokuments (atomar über Temp-Datei + rename) |
 | [`web/src/main.ts`](web/src/main.ts) | Frontend-TypeScript |
+| [`web/src/eo/`](web/src/eo/) | Geräte-Manager (Portierung von EO-Man), siehe unten |
+
+Der Geräte-Manager liegt bewusst komplett im Frontend — die Firmware speichert
+das Dokument, kennt aber sein Schema nicht und muss bei Modell-Erweiterungen
+nicht mitwachsen.
+
+| Modul | Verantwortung |
+|---|---|
+| [`eo/app.ts`](web/src/eo/app.ts) | Gemeinsamer Zustand + Persistenz-Anbindung (entspricht dem `DataManager`) |
+| [`eo/model.ts`](web/src/eo/model.ts) | Datenmodell, Dokument-Migration, gebündeltes Speichern gegen `/api/eo` |
+| [`eo/catalog.ts`](web/src/eo/catalog.ts) | Katalog-Lookups, Adressarithmetik, Signalstärke |
+| [`eo/catalog_data.ts`](web/src/eo/catalog_data.ts) | **Auto-generiert** via [`scripts/gen_eo_man_data.py`](scripts/gen_eo_man_data.py) |
+| [`eo/suggest.ts`](web/src/eo/suggest.ts) | HA-Konfiguration aus dem Katalog vorschlagen |
+| [`eo/ha_config.ts`](web/src/eo/ha_config.ts) | YAML-Generator + Sender-ID-Prüfung |
+| [`eo/filter.ts`](web/src/eo/filter.ts) | Tabellenfilter |
+| [`eo/telegram.ts`](web/src/eo/telegram.ts) | ESP3-Frames bauen/zerlegen (CRC8) |
+| [`eo/eep_decode.ts`](web/src/eo/eep_decode.ts) | EEP-Dekodierung, geteilt mit Telegramm-Tabelle und EEP-Prüfer |
+| [`eo/eep_eltako.ts`](web/src/eo/eep_eltako.ts) | Eltako-eigene Profile (M5/G5/H5), die nicht in der EnOcean-Spec stehen |
+| [`eo/pct14.ts`](web/src/eo/pct14.ts) | PCT14-XML lesen und um HA-Sender ergänzen |
+| [`eo/ui_devices.ts`](web/src/eo/ui_devices.ts) / [`ui_ha.ts`](web/src/eo/ui_ha.ts) / [`ui_tools.ts`](web/src/eo/ui_tools.ts) | Die drei Reiter |
 
 ## Entwicklung
 
