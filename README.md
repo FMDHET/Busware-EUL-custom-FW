@@ -131,6 +131,12 @@ sichtbar.
 - **Vorschlag aus Katalog** setzt EEP, Plattform und Zusatzfelder anhand des
   Gerätetyps — Katalog aus dem EO-Man-Projekt plus die ~200 Eltako-Funkmodelle
   aus dem EEP-Navigator
+- Beliebige HA-Zusatzfelder pro Gerät ergänzbar (`fast_status_change`,
+  `invert_signal`, `cooling_mode`, …), mit Vorschlagsliste der gängigen Felder
+- EEP-Auswahl umfasst neben den 163 offiziellen Profilen auch die
+  Eltako-eigenen `M5-38-08` (Schaltaktor-Rückmeldung), `G5-3F-7F` und
+  `H5-3F-7F` (Rollladen) — die stehen nicht in der EnOcean-Spezifikation,
+  werden von der HA-Eltako-Integration aber vorausgesetzt
 - Benannte, speicherbare Filter (global / Adresse / Externe ID / Typ / EEP),
   sortierbare Spalten, Signalstärke und „zuletzt gesehen" je Gerät
 
@@ -259,6 +265,7 @@ nicht mitwachsen.
 | [`eo/filter.ts`](web/src/eo/filter.ts) | Tabellenfilter |
 | [`eo/telegram.ts`](web/src/eo/telegram.ts) | ESP3-Frames bauen/zerlegen (CRC8) |
 | [`eo/eep_decode.ts`](web/src/eo/eep_decode.ts) | EEP-Dekodierung, geteilt mit Telegramm-Tabelle und EEP-Prüfer |
+| [`eo/eep_eltako.ts`](web/src/eo/eep_eltako.ts) | Eltako-eigene Profile (M5/G5/H5), die nicht in der EnOcean-Spec stehen |
 | [`eo/pct14.ts`](web/src/eo/pct14.ts) | PCT14-XML lesen und um HA-Sender ergänzen |
 | [`eo/ui_devices.ts`](web/src/eo/ui_devices.ts) / [`ui_ha.ts`](web/src/eo/ui_ha.ts) / [`ui_tools.ts`](web/src/eo/ui_tools.ts) | Die drei Reiter |
 

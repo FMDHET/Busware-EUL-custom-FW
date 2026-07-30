@@ -4,6 +4,7 @@
 // (eo_man: view/eep_checker_window.py + data_helper.get_values_for_eep).
 
 import { EEP_CATALOG } from '../eep_catalog';
+import { ELTAKO_EEP_CATALOG, eltakoVariant } from './eep_eltako';
 
 export interface DecodedValue {
     label: string;
@@ -29,14 +30,24 @@ export function fmtNum(x: number): string {
 }
 
 /**
- * Alle linearen Felder eines EEP aus dem Payload lesen. Leeres Array, wenn das
- * EEP unbekannt ist oder keine dekodierbaren Felder hat (viele VLD-Profile).
+ * Alle Felder eines EEP aus dem Payload lesen. Leeres Array, wenn das EEP
+ * unbekannt ist oder keine dekodierbaren Felder hat (viele VLD-Profile).
+ *
+ * Die Eltako-eigenen Profile (M5/G5/H5) stehen nicht in der EnOcean-Spec und
+ * kommen daher aus eep_eltako.ts.
  */
 export function decodeEepValues(eep: string, payload: number[]): DecodedValue[] {
-    const entry = EEP_CATALOG[eep];
-    if (!entry || !entry.lin) return [];
     const out: DecodedValue[] = [];
-    for (const f of entry.lin) {
+
+    const eltako = eltakoVariant(eep, payload.length);
+    for (const f of eltako?.enums ?? []) {
+        const raw = extractBits(payload, f.sb, f.w);
+        if (raw === null) continue;
+        out.push({ label: f.k, value: f.map?.[String(raw)] ?? String(raw), unit: f.u });
+    }
+
+    const entry = eltako ?? EEP_CATALOG[eep];
+    for (const f of entry?.lin ?? []) {
         const raw = extractBits(payload, f.sb, f.w);
         if (raw === null) continue;
         const [r0, p0] = f.lo;
@@ -48,6 +59,11 @@ export function decodeEepValues(eep: string, payload: number[]): DecodedValue[] 
     return out;
 }
 
+/** Fußnote zu einem Eltako-Profil ('' wenn keine). */
+export function eepNote(eep: string): string {
+    return ELTAKO_EEP_CATALOG[eep]?.note || '';
+}
+
 /** Kurzform der EEP-Dekodierung fuer eine Tabellenzelle. */
 export function decodeByEep(eep: string, payload: number[]): string {
     return decodeEepValues(eep, payload)
@@ -57,7 +73,7 @@ export function decodeByEep(eep: string, payload: number[]): string {
 
 /** Klartext des EEP aus dem Katalog ('' wenn unbekannt). */
 export function eepTitle(eep: string): string {
-    return EEP_CATALOG[eep]?.t || '';
+    return ELTAKO_EEP_CATALOG[eep]?.t || EEP_CATALOG[eep]?.t || '';
 }
 
 // -----------------------------------------------------------------------------
@@ -149,12 +165,17 @@ export const RORG_NAMES: Record<number, string> = {
 };
 
 export function eepClass(eep: string): string {
+    // Erst den Katalog fragen: die Eltako-Profile haben ein erfundenes
+    // Praefix (M5/G5/H5), aus dem sich die Telegrammklasse nicht ableiten
+    // laesst - M5-38-08 ist z.B. ein RPS-Telegramm.
+    const known = ELTAKO_EEP_CATALOG[eep]?.cls || EEP_CATALOG[eep]?.cls;
+    if (known) return known;
     return RORG_NAMES[parseInt(eep.slice(0, 2), 16)] || '';
 }
 
-/** Alle EEPs des Katalogs, optional auf eine RORG-Klasse eingeschraenkt. */
+/** Alle bekannten EEPs, optional auf eine RORG-Klasse eingeschraenkt. */
 export function eepNames(cls?: string): string[] {
-    return Object.keys(EEP_CATALOG)
-        .filter((k) => !cls || EEP_CATALOG[k].cls === cls)
+    return [...Object.keys(EEP_CATALOG), ...Object.keys(ELTAKO_EEP_CATALOG)]
+        .filter((k) => !cls || eepClass(k) === cls)
         .sort();
 }

@@ -41,10 +41,17 @@ body {
 }
 
 /* --- Header + Tabs --------------------------------------------------- */
+/* Kopfzeile und Reiterleiste bleiben beim Scrollen stehen. Die Reiter kleben
+   direkt unter der Kopfzeile, deren Hoehe je nach Geraetename ein bis zwei
+   Zeilen betraegt - deshalb wird sie per JS in --header-h gemessen, statt
+   einen festen Wert zu raten. */
 header {
   padding:12px 16px 8px;
   border-bottom:1px solid var(--border);
   background:var(--panel);
+  position:sticky;
+  top:0;
+  z-index:20;
 }
 header h1 { margin:0; font-size:1.2em; }
 header .status { font-size:0.85em; color:var(--hint); margin-top:4px; }
@@ -55,6 +62,9 @@ nav.tabs {
   background:var(--panel);
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
+  position:sticky;
+  top:var(--header-h, 0px);
+  z-index:19;
 }
 nav.tabs::-webkit-scrollbar { display:none; }
 nav.tabs button {
@@ -508,6 +518,21 @@ a { color:var(--brand); }
   <!-- =========================================================== Geraete -->
   <section class="tab" id="tab-geraete">
     <datalist id="eo_types"></datalist>
+    <!-- Zusatzfelder, die die HA-Eltako-Integration je Gerät auswertet.
+         Die Liste ist nur ein Vorschlag - eintragen lässt sich jedes Feld. -->
+    <datalist id="eo_ha_fields">
+      <option value="fast_status_change"></option>
+      <option value="device_class"></option>
+      <option value="invert_signal"></option>
+      <option value="time_closes"></option>
+      <option value="time_opens"></option>
+      <option value="temperature_unit"></option>
+      <option value="min_target_temperature"></option>
+      <option value="max_target_temperature"></option>
+      <option value="cooling_mode"></option>
+      <option value="meter_tariffs"></option>
+      <option value="voc_type_indexes"></option>
+    </datalist>
 
     <fieldset><legend>Filter</legend>
       <div class="eo-filter">

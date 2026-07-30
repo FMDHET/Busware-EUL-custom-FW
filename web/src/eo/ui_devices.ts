@@ -355,6 +355,11 @@ function renderDetails(): void {
 
       <label style="margin-top:10px">Zusatzfelder (Home Assistant)</label>
       <div id="eo_d_add">${additionalFieldsHtml(d.additional)}</div>
+      <div class="row" style="margin-top:6px">
+        <input type="text" id="eo_d_addkey" list="eo_ha_fields" placeholder="Feldname, z.B. fast_status_change" maxlength="40">
+        <input type="text" id="eo_d_addval" placeholder="Wert, z.B. true" maxlength="80">
+        <button type="button" class="ghost" id="eo_d_addbtn">Feld hinzufügen</button>
+      </div>
 
       ${memoryHtml(d)}
       ${relatedHtml(d)}
@@ -369,6 +374,29 @@ function renderDetails(): void {
     `;
 
     byId('eo_d_apply')?.addEventListener('click', () => applyDetails(d));
+    byId('eo_d_addbtn')?.addEventListener('click', () => {
+        const key = byId<HTMLInputElement>('eo_d_addkey')?.value.trim() ?? '';
+        const value = byId<HTMLInputElement>('eo_d_addval')?.value.trim() ?? '';
+        if (!key) { eoApp.ctx.say('Feldname fehlt'); return; }
+        if (!/^[a-z0-9_]+$/i.test(key)) {
+            eoApp.ctx.say('Feldname darf nur Buchstaben, Ziffern und _ enthalten');
+            return;
+        }
+        applyDetails(d, false);
+        d.additional[key] = value;
+        eoApp.touch();
+        renderDetails();
+    });
+    // Zusatzfeld entfernen (nur die selbst angelegten bzw. nicht mehr
+    // gewuenschten - "Vorschlag aus Katalog" stellt die Standardfelder wieder her).
+    byId('eo_d_add')?.addEventListener('click', (e) => {
+        const key = (e.target as HTMLElement).getAttribute('data-del-field');
+        if (!key) return;
+        applyDetails(d, false);
+        delete d.additional[key];
+        eoApp.touch();
+        renderDetails();
+    });
     byId('eo_d_reload')?.addEventListener('click', () => renderDetails());
     byId('eo_d_suggest')?.addEventListener('click', () => {
         applyDetails(d, false);
@@ -464,22 +492,35 @@ function setByPath(fields: Record<string, AddField>, path: string, value: string
 function additionalFieldsHtml(fields: Record<string, AddField>, prefix = ''): string {
     const entries = Object.entries(fields);
     if (!entries.length && !prefix) {
-        return '<div class="hint">keine — ergeben sich aus Gerätetyp bzw. „Vorschlag aus Katalog“</div>';
+        return '<div class="hint">keine — ergeben sich aus Gerätetyp bzw. „Vorschlag aus Katalog“, weitere unten hinzufügbar</div>';
     }
     let out = '<div class="eo-grid">';
     for (const [key, value] of entries) {
         const path = prefix ? `${prefix}.${key}` : key;
         if (value && typeof value === 'object') {
-            out += `</div><label style="margin-top:6px">${escapeHtml(key)}</label>`;
+            out += `</div><label style="margin-top:6px">${escapeHtml(key)}${delButton(prefix, key)}</label>`;
             out += additionalFieldsHtml(value as Record<string, AddField>, path);
             out += '<div class="eo-grid">';
             continue;
         }
         out +=
-            `<label>${escapeHtml(key)}</label>` +
+            `<label>${escapeHtml(key)}${delButton(prefix, key)}</label>` +
             `<input type="text" data-path="${escapeHtml(path)}" value="${escapeHtml(String(value))}">`;
     }
     return out + '</div>';
+}
+
+/**
+ * Entfernen-Kreuz - nur auf oberster Ebene, verschachtelte Gruppen als Ganzes.
+ * Bewusst ein <span> und kein <a href="#">: letzteres wuerde den Hash aendern
+ * und damit den Reiter wechseln.
+ */
+function delButton(prefix: string, key: string): string {
+    if (prefix) return '';
+    return (
+        ` <span data-del-field="${escapeHtml(key)}" role="button" tabindex="0" ` +
+        `title="Feld entfernen" style="color:var(--danger);cursor:pointer">✕</span>`
+    );
 }
 
 function memoryHtml(d: EoDevice): string {

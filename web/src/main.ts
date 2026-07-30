@@ -166,6 +166,21 @@ function activateTab(name: TabName): void {
     if (name === 'ha') syncHaGateway();
 }
 
+// Die Reiterleiste klebt unter der Kopfzeile. Deren Hoehe haengt vom
+// Geraetenamen und der Fensterbreite ab (Umbruch), deshalb wird sie gemessen
+// statt geraten und als CSS-Variable bereitgestellt.
+function trackHeaderHeight(): void {
+    const header = document.querySelector<HTMLElement>('header');
+    if (!header) return;
+    const apply = () => {
+        document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
+    };
+    apply();
+    // Deckt auch das Umbrechen der Ueberschrift ab, das ein reines
+    // resize-Event auf dem Fenster nicht zuverlaessig meldet.
+    new ResizeObserver(apply).observe(header);
+}
+
 function activeTabName(): string {
     const el = document.querySelector<HTMLButtonElement>('nav.tabs button.active');
     return el?.dataset.tab ?? '';
@@ -1203,6 +1218,7 @@ async function initEo(): Promise<void> {
 
 function init(): void {
     initTabs();
+    trackHeaderHeight();
     wireEyeToggles();
     tokenDisplay = new SecretDisplay(byId('token'));
     adminDisplay = new SecretDisplay(byId('adminp'));
