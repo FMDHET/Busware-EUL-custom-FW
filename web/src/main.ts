@@ -439,7 +439,7 @@ async function doScan(): Promise<void> {
     try {
         const arr = await api.scan();
         const sel = byId<HTMLSelectElement>('ssid_sel');
-        sel.innerHTML = '<option value="">-- Netzwerk waehlen --</option>';
+        sel.innerHTML = '<option value="">— Netzwerk wählen —</option>';
         arr.forEach((n) => {
             const opt = document.createElement('option');
             opt.value = n.ssid;
@@ -595,18 +595,18 @@ async function doSave(): Promise<void> {
         body.wifi_ssid = s;
         body.wifi_pass = p;
     } else if (s || p) {
-        if (!confirm('WLAN-Zugang bleibt unveraendert (nur SSID oder Passwort eingetragen). Fortfahren?')) return;
+        if (!confirm('WLAN-Zugang bleibt unverändert (nur SSID oder Passwort eingetragen). Fortfahren?')) return;
     }
     try {
         await api.save(body);
-        say('gespeichert — Neustart noetig fuer WLAN/TCP/Name/Zeitzone');
+        say('gespeichert — Neustart nötig für WLAN/TCP/Name/Zeitzone');
     } catch (e) {
         say(`Fehler: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
 
 async function doReboot(): Promise<void> {
-    if (!confirm('Geraet jetzt neu starten? Die Verbindung wird kurz getrennt.')) return;
+    if (!confirm('Gerät jetzt neu starten? Die Verbindung wird kurz getrennt.')) return;
     try {
         await api.reboot();
         say('Neustart ausgeloest ...');
@@ -623,7 +623,7 @@ async function waitForDeviceBack(prog: HTMLElement): Promise<void> {
     await new Promise((r) => setTimeout(r, 3000));
     while (Date.now() - t0 < 120000) {
         const sec = Math.round((Date.now() - t0) / 1000);
-        prog.textContent = `Geraet startet neu ... warte auf Wiederverbindung (${sec}s)`;
+        prog.textContent = `Gerät startet neu ... warte auf Wiederverbindung (${sec}s)`;
         try {
             const ctl = new AbortController();
             const to = setTimeout(() => ctl.abort(), 1500);
@@ -637,14 +637,14 @@ async function waitForDeviceBack(prog: HTMLElement): Promise<void> {
         } catch { /* noch nicht erreichbar -> weiter pollen */ }
         await new Promise((r) => setTimeout(r, 1500));
     }
-    prog.textContent = 'Geraet meldet sich nicht zurueck — Seite bitte manuell neu laden.';
+    prog.textContent = 'Gerät meldet sich nicht zurück — Seite bitte manuell neu laden.';
 }
 
 function doOtaUpload(): void {
     const input = byId<HTMLInputElement>('ota_file');
     const file = input.files && input.files[0];
-    if (!file) { say('Bitte zuerst eine .bin-Datei waehlen'); return; }
-    if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Geraet startet danach neu.`)) return;
+    if (!file) { say('Bitte zuerst eine .bin-Datei wählen'); return; }
+    if (!confirm(`Firmware "${file.name}" (${fmtBytes(file.size)}) einspielen? Das Gerät startet danach neu.`)) return;
 
     const prog = byId('ota_progress');
     const wrap = byId('ota_bar_wrap');
@@ -676,7 +676,7 @@ function doOtaUpload(): void {
     xhr.upload.onload = () => {
         bar.style.width = '100%';
         wrap.classList.add('indet');
-        prog.textContent = 'Upload fertig — Geraet prueft und aktiviert das Image ...';
+        prog.textContent = 'Upload fertig — Gerät prüft und aktiviert das Image ...';
     };
     xhr.onload = () => {
         wrap.classList.remove('indet');
@@ -702,7 +702,7 @@ function doOtaUpload(): void {
 }
 
 async function doFactoryReset(): Promise<void> {
-    if (!confirm('Wirklich auf Werkseinstellungen zuruecksetzen? Alle Zugangsdaten werden neu erzeugt.')) return;
+    if (!confirm('Wirklich auf Werkseinstellungen zurücksetzen? Alle Zugangsdaten werden neu erzeugt.')) return;
     try {
         await api.factoryReset();
         say('reset · neustart');
@@ -775,7 +775,7 @@ async function pollStats(): Promise<void> {
             `Uptime        : ${fmtUptime(s.uptime_ms)}\n` +
             `Aktive Clients: ${s.clients}\n` +
             `Freier Heap   : ${fmtBytes(s.heap_free)}\n` +
-            `Groesster Block: ${fmtBytes(s.heap_max)}`;
+            `Größter Block : ${fmtBytes(s.heap_max)}`;
         byId('stats').textContent =
             `RX vom TCM515 : ${fmtBytes(s.tcm_rx_bytes)} / ${s.tcm_rx_frames} Frames\n` +
             `TX an TCM515  : ${fmtBytes(s.tcm_tx_bytes)} / ${s.tcm_tx_frames} Frames`;
@@ -1164,7 +1164,7 @@ function clearConsole(): void {
 function togglePause(): void {
     conPaused = !conPaused;
     byId('btn-pause').textContent = conPaused ? 'Weiter' : 'Pause';
-    say(conPaused ? 'Konsole angehalten' : 'Konsole laeuft');
+    say(conPaused ? 'Konsole angehalten' : 'Konsole läuft');
 }
 
 function wireConsoleKeyboard(): void {

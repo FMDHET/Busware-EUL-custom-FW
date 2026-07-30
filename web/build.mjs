@@ -20,6 +20,11 @@ const res = await build({
     minify: true,
     target: 'es2020',
     format: 'iife',
+    // Ohne das escapt esbuild jedes Nicht-ASCII-Zeichen zu \xNN. Zur Laufzeit
+    // ist das gleichwertig, macht aber portal_html.h unlesbar: aus "Gerät"
+    // wird "Ger\xE4t", und ein grep nach deutschen Texten findet nichts mehr.
+    // Die Seite liefert ohnehin charset=utf-8 aus.
+    charset: 'utf8',
     write: false,
     logLevel: 'warning',
 });

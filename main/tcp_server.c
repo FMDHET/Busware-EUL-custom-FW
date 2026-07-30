@@ -329,13 +329,13 @@ static bool spawn_client(int sock, const struct sockaddr_in *addr)
     // Task-Erzeugung pruefen: schlaegt sie bei wenig RAM fehl, sauber ablehnen
     // statt mit halb-initialisiertem Slot weiterzulaufen (fuehrte zum Crash).
     if (xTaskCreate(client_rx_task, "eul-cli-rx", 4096, slot, 10, NULL) != pdPASS) {
-        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer RX-Task", slot->peer);
+        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM für RX-Task", slot->peer);
         close_slot_locked(slot);                 // kein Task laeuft -> direkt freigeben
         xSemaphoreGive(s_slots_mtx);
         return false;
     }
     if (xTaskCreate(client_tx_task, "eul-cli-tx", 2048, slot, 10, NULL) != pdPASS) {
-        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM fuer TX-Task", slot->peer);
+        EVT_WARN("tcp", "Client %s abgewiesen: kein RAM für TX-Task", slot->peer);
         // Kein TX-Task -> RX-Task muss nicht auf ihn warten.
         slot->tx_running = false;
         // RX-Task laeuft schon und raeumt auf, sobald active=false + Socket zu.

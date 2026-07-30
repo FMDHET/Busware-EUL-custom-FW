@@ -34,7 +34,7 @@ esp_err_t devstore_init(void)
 
     esp_err_t r = esp_vfs_spiffs_register(&conf);
     if (r != ESP_OK) {
-        ESP_LOGE(TAG, "SPIFFS-Mount fehlgeschlagen (%s) - Geraete-Inventar "
+        ESP_LOGE(TAG, "SPIFFS-Mount fehlgeschlagen (%s) - Geräte-Inventar "
                       "wird nicht persistiert", esp_err_to_name(r));
         return r;
     }
@@ -91,7 +91,7 @@ esp_err_t devstore_commit(FILE *f)
     // fclose() meldet auch Fehler, die erst beim Flush auffallen (volle
     // Partition). Nur bei sauberem Abschluss darf das alte Dokument weichen.
     if (fclose(f) != 0) {
-        ESP_LOGE(TAG, "Schreibfehler beim Abschliessen - Dokument unveraendert");
+        ESP_LOGE(TAG, "Schreibfehler beim Abschließen - Dokument unverändert");
         unlink(TMP_PATH);
         return ESP_FAIL;
     }

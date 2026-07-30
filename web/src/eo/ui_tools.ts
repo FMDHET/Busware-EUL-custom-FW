@@ -403,7 +403,7 @@ function renderCatalog(): void {
 
 function onBackup(): void {
     downloadText(
-        `eul-geraete-${new Date().toISOString().slice(0, 10)}.json`,
+        `eul-inventar-${new Date().toISOString().slice(0, 10)}.json`,
         JSON.stringify(eoApp.doc, null, 2),
         'application/json;charset=utf-8',
     );

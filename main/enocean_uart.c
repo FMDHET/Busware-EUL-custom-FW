@@ -144,7 +144,7 @@ esp_err_t enocean_uart_start(void)
 
     // Stack grosszuegig: der RX-Fanout speist Telemetrie (JSON-Bau).
     if (xTaskCreate(rx_task, "eul-uart-rx", 5120, NULL, 12, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "kein RAM fuer die UART-RX-Task");
+        ESP_LOGE(TAG, "kein RAM für die UART-RX-Task");
         return ESP_ERR_NO_MEM;
     }
 

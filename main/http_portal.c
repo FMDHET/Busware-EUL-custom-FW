@@ -246,7 +246,7 @@ static bool body_size_ok(httpd_req_t *req)
     }
     if (req->content_len > EUL_MAX_BODY) {
         httpd_resp_set_status(req, "400 Bad Request");
-        httpd_resp_sendstr(req, "Body zu gross (max. 4096 Byte)");
+        httpd_resp_sendstr(req, "Body zu groß (max. 4096 Byte)");
         return false;
     }
     return true;

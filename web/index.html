@@ -407,8 +407,8 @@ a { color:var(--brand); }
 
   <!-- ========================================================= Allgemein -->
   <section class="tab" id="tab-allgemein">
-    <fieldset><legend>Geraet</legend>
-      <label>Geraetename</label>
+    <fieldset><legend>Gerät</legend>
+      <label>Gerätename</label>
       <input type="text" id="dev_name" maxlength="39" autocomplete="off" placeholder="z.B. EnOcean Gateway Flur">
       <div class="hint">Anzeigename im Portal-Titel und in Home Assistant.</div>
     </fieldset>
@@ -418,9 +418,9 @@ a { color:var(--brand); }
       <input type="text" id="admin_user" maxlength="23" autocomplete="off" placeholder="admin">
       <label>Aktuelles Passwort <span class="hint">(nur beim Erst-Setup sichtbar)</span></label>
       <div id="adminp" class="secret"></div>
-      <label>Neues Passwort <span class="hint">(leer = unveraendert, min. 8 Zeichen)</span></label>
-      <input type="password" id="admin_pass_new" maxlength="63" placeholder="unveraendert" autocomplete="off" data-eye>
-      <div class="hint">Login fuer dieses Portal im Normalbetrieb (STA-Modus).</div>
+      <label>Neues Passwort <span class="hint">(leer = unverändert, min. 8 Zeichen)</span></label>
+      <input type="password" id="admin_pass_new" maxlength="63" placeholder="unverändert" autocomplete="off" data-eye>
+      <div class="hint">Login für dieses Portal im Normalbetrieb (STA-Modus).</div>
     </fieldset>
 
     <fieldset><legend>Zeit (NTP)</legend>
@@ -439,7 +439,7 @@ a { color:var(--brand); }
         <button type="button" class="ghost" id="btn-ota">Hochladen &amp; Update</button>
       </div>
       <div class="progress" id="ota_bar_wrap"><div id="ota_bar"></div></div>
-      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul/firmware.bin</code>. Das Geraet startet nach erfolgreichem Update automatisch neu.</div>
+      <div id="ota_progress" class="hint">Datei: <code>.pio/build/busware-eul/firmware.bin</code>. Das Gerät startet nach erfolgreichem Update automatisch neu.</div>
       <hr>
       <label>OTA-Token <span class="hint">(erlaubt NUR Firmware-Updates, kein Portal-Zugriff)</span></label>
       <div class="row">
@@ -448,7 +448,7 @@ a { color:var(--brand); }
       </div>
       <div class="hint">Damit lassen sich Updates delegieren, ohne das Admin-Passwort weiterzugeben:<br>
         <code>curl -H "Authorization: Bearer &lt;token&gt;" --data-binary @firmware.bin http://&lt;ip&gt;/api/ota</code><br>
-        &bdquo;Neu erzeugen&ldquo; macht den alten Token sofort ungueltig.</div>
+        &bdquo;Neu erzeugen&ldquo; macht den alten Token sofort ungültig.</div>
     </fieldset>
   </section>
 
@@ -457,7 +457,7 @@ a { color:var(--brand); }
     <fieldset><legend>WLAN (Heimnetz)</legend>
       <label>SSID</label>
       <div class="row">
-        <select id="ssid_sel"><option value="">-- Netzwerk waehlen --</option></select>
+        <select id="ssid_sel"><option value="">— Netzwerk wählen —</option></select>
         <button type="button" class="ghost" id="btn-scan">Suchen</button>
       </div>
       <label>oder SSID manuell</label>
@@ -471,7 +471,7 @@ a { color:var(--brand); }
   <section class="tab" id="tab-usb">
     <fieldset><legend>USB-CDC-Bridge</legend>
       <label class="inline"><input type="checkbox" id="usb_en"> USB als transparente ESP3-Bridge aktivieren</label>
-      <div class="hint">Erlaubt Direkt-Zugriff auf den TCM515 ueber die USB-C-Buchse als virtuellen COM-Port. Aus Sicherheitsgruenden (CRA) standardmaessig aus.</div>
+      <div class="hint">Erlaubt Direkt-Zugriff auf den TCM515 über die USB-C-Buchse als virtuellen COM-Port. Aus Sicherheitsgründen (CRA) standardmäßig aus.</div>
     </fieldset>
 
     <fieldset><legend>Hinweis</legend>
@@ -694,13 +694,13 @@ a { color:var(--brand); }
   <section class="tab" id="tab-api">
     <fieldset><legend>REST-API</legend>
       <label class="inline"><input type="checkbox" id="api_en"> REST-API aktivieren</label>
-      <div class="hint">HTTP-Zugriff auf empfangene Telegramme und zum Senden. Authentifizierung ueber den Geraete-Token, per Header <code>Authorization: Bearer &lt;token&gt;</code> oder Query <code>?token=&lt;token&gt;</code>.</div>
-      <label>Geraete-Token</label>
+      <div class="hint">HTTP-Zugriff auf empfangene Telegramme und zum Senden. Authentifizierung über den Geräte-Token, per Header <code>Authorization: Bearer &lt;token&gt;</code> oder Query <code>?token=&lt;token&gt;</code>.</div>
+      <label>Geräte-Token</label>
       <div class="row">
         <div id="api_token" class="secret"></div>
         <button type="button" class="ghost" id="btn-regen2">Neu erzeugen</button>
       </div>
-      <div class="hint">Derselbe Token wie fuer die TCP-Bridge (Reiter EnOcean).</div>
+      <div class="hint">Derselbe Token wie für die TCP-Bridge (Reiter EnOcean).</div>
     </fieldset>
 
     <fieldset><legend>Endpunkte</legend>
