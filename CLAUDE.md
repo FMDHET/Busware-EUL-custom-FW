@@ -123,6 +123,51 @@ Build-Pipeline. Setup:
 Der User hatte kein Node installiert; wir haben `brew install node` gemacht
 und dann funktioniert alles ohne weiteres Zutun.
 
+### Geräte-Manager: Portierung von EO-Man (Branch `eo_man`)
+
+Der Portal-Geräte-Manager ist eine Portierung von
+[grimmpp/enocean-device-manager](https://github.com/grimmpp/enocean-device-manager)
+(wxPython-Desktop-App) ins Browser-Frontend. Leitentscheidungen:
+
+- **Logik komplett im Frontend.** Die Firmware speichert ein opakes
+  JSON-Dokument und kennt sein Schema nicht. Jede Modellerweiterung ist damit
+  eine reine TypeScript-Änderung ohne Firmware-Flash.
+- **SPIFFS statt NVS.** Der Bestand liegt auf der ohnehin reservierten, bis
+  dahin ungenutzten `storage`-Partition (952 KB). Im NVS (24 KB) liegen die
+  WLAN-Credentials — ein wachsendes Inventar dürfte die nie gefährden.
+- **`partitions.csv` bleibt unverändert.** Eine geänderte Partitionstabelle
+  wird beim OTA **nicht** mitgeschrieben; ein OTA-Gerät würde SPIFFS dann an
+  der falschen Stelle suchen.
+- **Ganzes Dokument statt Deltas.** Gespeichert wird gebündelt (1,2 s
+  Debounce), sonst löst jeder Tastendruck in der Tabelle einen SPIFFS-Write aus.
+
+Nicht portierbar und bewusst weggelassen: FAM14-Bus-Scan (Speicherauslesen
+über RS485), Bus-Burst-Tester, Erkennung fremder ESP2-Gateways. Der EUL hat
+keinen Bus-Zugang. Der **PCT14-Import** liefert dieselben Daten aus einem
+XML-Export.
+
+Abweichungen vom Original, die absichtlich sind (jeweils im Code kommentiert):
+
+- `suggest.ts`: ohne Katalogtreffer bleibt `useInHa` unangetastet. Das Original
+  setzt es dort auf `true`, was Geräte ohne EEP in den Export spült.
+- `pct14.ts`: die Speichereinträge werden wirklich ausgelesen. Im Original
+  liest `_get_sensor_from_xml` sie mit `getattr()` aus einem `dict` — das
+  liefert immer 0, damit gäbe es weder Tastenfunktionen noch verknüpfte Geräte.
+- `telegram.ts`: ESP3 statt ESP2. Der TCM515 spricht ESP3, das Desktop-Tool
+  baut ESP2-Telegramme für den Eltako-Bus.
+
+Datentabellen werden generiert, nicht abgeschrieben:
+`python scripts/gen_eo_man_data.py` klont die Upstream-Repos und schreibt
+`web/src/eo/catalog_data.ts` (Gerätekatalog + PCT14-Tastenfunktionen).
+
+### ⚠️ Trigraph-Falle im Portal-Build
+
+`web/build.mjs` escapt jedes `?` im erzeugten C-String. Minifiziertes JS
+enthält laufend Folgen wie `a??!b` oder `x?.y??"z"`; `??!` ist ein C-Trigraph
+und der ESP-IDF-Build bricht mit `-Werror=trigraphs` ab. Der Fehler zeigt auf
+`main/portal_html.h` und sieht aus wie ein kaputtes Generat — ist aber ein
+fehlendes Escape. Nicht „reparieren", indem man die Warnung abschaltet.
+
 ## Build-Workflow
 
 Entwicklungsumgebung ist **Windows 11** mit PlatformIO. Das Repo liegt unter
@@ -232,6 +277,8 @@ Reihenfolge fürs Onboarding:
 5. **[tcp_server.c](main/tcp_server.c)** — Kern-Bridge-Logik
 6. **[http_portal.c](main/http_portal.c)** — Web-Portal-Endpoints
 7. **[web/src/main.ts](web/src/main.ts)** — Frontend
+8. **[web/src/eo/app.ts](web/src/eo/app.ts)** — Einstieg in den Geräte-Manager
+   (von dort weiter zu `model.ts` → `catalog.ts` → `ha_config.ts`)
 
 ## User-Kontext
 

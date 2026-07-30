@@ -13,6 +13,7 @@
 #include "console_log.h"
 #include "event_log.h"
 #include "telemetry.h"
+#include "device_store.h"
 #include "version.h"
 
 #include <string.h>
@@ -330,6 +331,11 @@ esp_err_t mode_mgr_start(void)
     console_log_init();
     event_log_init();
     telemetry_init();
+    // Geraete-Inventar (SPIFFS). Scheitert der Mount, laeuft alles andere
+    // weiter - das Portal zeigt den Datenbestand dann nur nicht persistent.
+    if (devstore_init() != ESP_OK) {
+        EVT_WARN("devstore", "Speicher für Geräte-Inventar nicht verfügbar");
+    }
     EVT_INFO("boot", "Busware EUL v%s build %d (%s) gestartet",
              EUL_FW_VERSION, EUL_FW_BUILD, EUL_FW_GIT);
 

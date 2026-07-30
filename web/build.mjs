@@ -33,7 +33,15 @@ const finalHtml = html.replace('<!--SCRIPT-->', `<script>${js}</script>`);
 // index.html sonst \r\n; ein zurueckbleibendes \r landet im C-String und wird
 // vom Compiler als Zeilenende gewertet -> "missing terminating character".
 const cLines = finalHtml.split(/\r\n|\r|\n/).map((line) => {
-    const esc = line.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const esc = line
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        // Trigraphs: "??" gefolgt von =/(/)//'<>!- deutet der C-Compiler als
+        // Sonderzeichen und bricht mit -Werror=trigraphs ab. Minifiziertes JS
+        // erzeugt solche Folgen laufend (`a??!b`, `x?.y??"z"`). Ein "\?" ist
+        // ein gueltiges C-Escape fuer "?" und verhindert die Erkennung - wir
+        // escapen pauschal jedes Fragezeichen statt Sonderfaelle zu jagen.
+        .replace(/\?/g, '\\?');
     return `"${esc}\\n"`;
 });
 

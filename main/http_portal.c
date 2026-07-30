@@ -8,6 +8,7 @@
 #include "console_log.h"
 #include "event_log.h"
 #include "telemetry.h"
+#include "device_store.h"
 #include "version.h"
 #include "sdkconfig.h"
 
@@ -455,6 +456,12 @@ static esp_err_t h_factory(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
+    // "as-shipped" heisst auch: kein Geraete-Inventar mehr. Fehler hier sind
+    // nicht fatal - die Credentials sind bereits zurueckgesetzt, das Geraet
+    // muss neu starten koennen.
+    if (devstore_clear() != ESP_OK) {
+        ESP_LOGW(TAG, "Geräte-Inventar konnte nicht gelöscht werden");
+    }
     httpd_resp_sendstr(req, "{\"ok\":true}");
     schedule_reboot();
     return ESP_OK;
@@ -499,12 +506,17 @@ static esp_err_t h_stats(httpd_req_t *req)
     long long epoch_ms = (tv.tv_sec > 1700000000LL)
         ? ((long long)tv.tv_sec * 1000 + tv.tv_usec / 1000) : 0;
 
-    char buf[448];
+    // Belegung des Geraete-Speichers (SPIFFS) fuer den Werkzeuge-Reiter.
+    size_t fs_total = 0, fs_used = 0;
+    devstore_fs_info(&fs_total, &fs_used);
+
+    char buf[576];
     int n = snprintf(buf, sizeof(buf),
         "{\"clients\":%d,"
         "\"tcm_rx_bytes\":%llu,\"tcm_tx_bytes\":%llu,"
         "\"tcm_rx_frames\":%u,\"tcm_tx_frames\":%u,"
         "\"ip\":\"%s\",\"rssi\":%d,\"uptime_ms\":%llu,\"epoch_ms\":%lld,"
+        "\"fs_total\":%u,\"fs_used\":%u,\"eo_bytes\":%u,"
         "\"heap_free\":%u,\"heap_max\":%u}",
         tcp_server_active_clients(),
         (unsigned long long)enocean_uart_rx_bytes(),
@@ -515,6 +527,7 @@ static esp_err_t h_stats(httpd_req_t *req)
         rssi,
         (unsigned long long)(esp_timer_get_time() / 1000),
         epoch_ms,
+        (unsigned)fs_total, (unsigned)fs_used, (unsigned)devstore_size(),
         (unsigned)esp_get_free_heap_size(),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
@@ -803,6 +816,111 @@ static esp_err_t h_send(httpd_req_t *req)
     return httpd_resp_sendstr(req, w == ESP_OK ? "{\"ok\":true}" : "{\"ok\":false}");
 }
 
+// -----------------------------------------------------------------------------
+// Geraete-Manager: der komplette Portal-Datenbestand (Inventar, Filter,
+// Telegramm-Vorlagen) als EIN JSON-Dokument auf SPIFFS. Bewusst als opakes
+// Dokument behandelt - das Datenmodell lebt im Frontend, die Firmware muss es
+// nicht kennen und bei jeder Modell-Erweiterung mitwachsen.
+// -----------------------------------------------------------------------------
+
+// GET /api/eo -> gespeichertes Dokument (oder ein leeres Grundgeruest)
+static esp_err_t h_eo_get(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+
+    httpd_resp_set_type(req, "application/json");
+
+    FILE *f = devstore_open_read();
+    if (!f) {
+        // Kein Dokument (Erstboot / nach Werksreset) ist kein Fehler.
+        return httpd_resp_sendstr(req, "{\"devices\":{},\"filters\":{},\"templates\":[]}");
+    }
+
+    char buf[1024];
+    size_t n;
+    esp_err_t r = ESP_OK;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) { r = ESP_FAIL; break; }
+    }
+    fclose(f);
+    if (r != ESP_OK) return r;                  // Client weg: Chunk-Stream nicht schliessen
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+// POST /api/eo  Body = komplettes JSON-Dokument -> ersetzt den Datenbestand.
+// Laeuft ueber Temp-Datei + rename, ein Abbruch laesst das alte Dokument intakt.
+static esp_err_t h_eo_post(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (!devstore_available()) {
+        httpd_resp_set_status(req, "507 Insufficient Storage");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"Speicher nicht verfügbar\"}");
+    }
+    if (req->content_len == 0 || req->content_len > EUL_DEVSTORE_MAX_BYTES) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"Body leer oder zu groß\"}");
+    }
+
+    FILE *f = devstore_open_write();
+    if (!f) { httpd_resp_send_500(req); return ESP_FAIL; }
+
+    char *buf = malloc(1024);
+    if (!buf) { devstore_abort(f); httpd_resp_send_500(req); return ESP_FAIL; }
+
+    int  remaining = (int)req->content_len;
+    bool ok = true;
+    // Gleiche Begruendung wie beim OTA-Upload: ein Client, der Content-Length
+    // ankuendigt und dann schweigt, wuerde die HTTP-Task sonst dauerhaft
+    // blockieren. Nach 12 x recv_wait_timeout (= 60 s) abbrechen.
+    const int MAX_IDLE = 12;
+    int idle = 0;
+    while (remaining > 0) {
+        int r = httpd_req_recv(req, buf, remaining < 1024 ? remaining : 1024);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++idle >= MAX_IDLE) { ok = false; break; }
+            continue;
+        }
+        if (r <= 0) { ok = false; break; }
+        idle = 0;
+        if (fwrite(buf, 1, (size_t)r, f) != (size_t)r) { ok = false; break; }
+        remaining -= r;
+    }
+    free(buf);
+
+    if (!ok) {
+        devstore_abort(f);
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"Upload abgebrochen\"}");
+    }
+    if (devstore_commit(f) != ESP_OK) {
+        httpd_resp_set_status(req, "507 Insufficient Storage");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"Schreibfehler (Speicher voll?)\"}");
+    }
+
+    char out[64];
+    snprintf(out, sizeof(out), "{\"ok\":true,\"bytes\":%u}", (unsigned)devstore_size());
+    return httpd_resp_sendstr(req, out);
+}
+
+// POST /api/eo/clear -> Inventar loeschen (Werksreset nur des Datenbestands)
+static esp_err_t h_eo_clear(httpd_req_t *req)
+{
+    if (!require_auth(req)) return ESP_OK;
+    if (!origin_ok(req)) return csrf_reject(req);
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t r = devstore_clear();
+    if (r != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
 // POST /api/ota  Body = rohes Firmware-.bin -> in die inaktive OTA-Partition
 // schreiben, als Boot-Partition setzen, neu starten.
 // Auth: OTA-Token (Bearer/Query) ODER Basic-Auth.
@@ -888,8 +1006,9 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     // Achtung: muss ALLE registrierten Handler decken - im AP-Modus kommen zu
     // den API-Handlern noch 4 Captive-Portal-Redirects dazu. Mit 16 schlugen
-    // deren Registrierungen frueher still fehl.
-    cfg.max_uri_handlers = 24;
+    // deren Registrierungen frueher still fehl. Aktuell 20 + 4 (AP) = 24,
+    // mit Reserve fuer weitere Endpunkte.
+    cfg.max_uri_handlers = 28;
     cfg.stack_size = 8192;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     // Mehr gleichzeitige Verbindungen zulassen und alte automatisch schliessen
@@ -925,6 +1044,9 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_uri_t u_ota  = { .uri="/api/ota",       .method=HTTP_POST, .handler=h_ota };
     httpd_uri_t u_bidr = { .uri="/api/baseid",    .method=HTTP_GET,  .handler=h_baseid_read };
     httpd_uri_t u_bidw = { .uri="/api/baseid",    .method=HTTP_POST, .handler=h_baseid_write };
+    httpd_uri_t u_eog  = { .uri="/api/eo",        .method=HTTP_GET,  .handler=h_eo_get };
+    httpd_uri_t u_eop  = { .uri="/api/eo",        .method=HTTP_POST, .handler=h_eo_post };
+    httpd_uri_t u_eoc  = { .uri="/api/eo/clear",  .method=HTTP_POST, .handler=h_eo_clear };
     // Captive-Portal-Erkennung bekannter Betriebssysteme: alles auf / umleiten
     httpd_uri_t u_gen  = { .uri="/generate_204", .method=HTTP_GET, .handler=h_captive };
     httpd_uri_t u_hs   = { .uri="/hotspot-detect.html", .method=HTTP_GET, .handler=h_captive };
@@ -948,6 +1070,9 @@ esp_err_t http_portal_start(bool ap_mode)
     httpd_register_uri_handler(srv, &u_ota);
     httpd_register_uri_handler(srv, &u_bidr);
     httpd_register_uri_handler(srv, &u_bidw);
+    httpd_register_uri_handler(srv, &u_eog);
+    httpd_register_uri_handler(srv, &u_eop);
+    httpd_register_uri_handler(srv, &u_eoc);
     if (ap_mode) {
         httpd_register_uri_handler(srv, &u_gen);
         httpd_register_uri_handler(srv, &u_hs);
