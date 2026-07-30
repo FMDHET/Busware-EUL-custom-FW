@@ -8,7 +8,7 @@ import { eoApp } from './eo/app';
 import { describeTelegram, eepFromTeachIn4bs } from './eo/eep_decode';
 import { initDevicesTab, renderTable as renderDeviceList } from './eo/ui_devices';
 import { initHaTab, syncHaGateway } from './eo/ui_ha';
-import { initToolsTab, updateStorageInfo } from './eo/ui_tools';
+import { initImportTab, initToolsTab, updateStorageInfo } from './eo/ui_tools';
 
 // -----------------------------------------------------------------------------
 // Types (spiegeln HTTP-Backend)
@@ -148,7 +148,7 @@ function currentHost(): string {
 // -----------------------------------------------------------------------------
 type TabName =
     | 'status' | 'allgemein' | 'wifi' | 'usb' | 'enocean'
-    | 'geraete' | 'ha' | 'werkzeuge' | 'api' | 'events' | 'konsole';
+    | 'geraete' | 'ha' | 'werkzeuge' | 'import' | 'api' | 'events' | 'konsole';
 
 function activateTab(name: TabName): void {
     document.querySelectorAll<HTMLButtonElement>('nav.tabs button').forEach((b) => {
@@ -757,9 +757,9 @@ function rssiQuality(r: number): string {
 }
 
 async function pollStats(): Promise<void> {
-    // Der Werkzeuge-Reiter zeigt die Speicherbelegung aus derselben Antwort.
+    // Der Import/Export-Reiter zeigt die Speicherbelegung aus derselben Antwort.
     const tab = activeTabName();
-    if (tab !== 'status' && tab !== 'werkzeuge') return;
+    if (tab !== 'status' && tab !== 'import') return;
     try {
         const s = await api.stats();
         updateStorageInfo(s.fs_total, s.fs_used, s.eo_bytes);
@@ -1214,6 +1214,7 @@ async function initEo(): Promise<void> {
     initDevicesTab();
     initHaTab();
     initToolsTab();
+    initImportTab();
 }
 
 function init(): void {

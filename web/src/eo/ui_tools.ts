@@ -425,10 +425,15 @@ async function onRestore(): Promise<void> {
 
 // -----------------------------------------------------------------------------
 
+/** Reiter "Werkzeuge": Telegramm senden und EEP-Prüfer. */
 export function initToolsTab(): void {
     initSender();
     initEepChecker();
+    eoApp.onDevicesChanged(renderTemplates);
+}
 
+/** Reiter "Import/Export": PCT14, Gerätekatalog, Sicherung. */
+export function initImportTab(): void {
     byId('pct14_import')?.addEventListener('click', () => void onPct14Import());
     byId('pct14_extend')?.addEventListener('click', () => void onPct14Extend());
 
@@ -437,8 +442,6 @@ export function initToolsTab(): void {
 
     byId('eo_backup')?.addEventListener('click', onBackup);
     byId('eo_restore')?.addEventListener('click', () => void onRestore());
-
-    eoApp.onDevicesChanged(renderTemplates);
 }
 
 /** Wird vom Statuspolling gefüttert, damit der Speicherstand aktuell bleibt. */
