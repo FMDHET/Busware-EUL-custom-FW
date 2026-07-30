@@ -8,8 +8,62 @@ import { generateHaConfig, validateSenderIds, type HaGatewayOptions } from './ha
 import { byId, downloadText, escapeHtml, optionList } from './dom';
 import { eoApp } from './app';
 
+/** Der Gateway-Typ, unter dem dieses Gerät bei Home Assistant auftritt. */
+const SELF = 'eul_lan';
+
+/**
+ * Beschreibt der Reiter dieses Gerät (Normalfall), oder ein fremdes Gateway?
+ * Nur im zweiten Fall darf man Base-ID, Host und Port hier von Hand setzen -
+ * sonst kommen sie aus dem EnOcean-Reiter, der sie definiert.
+ */
+function describesSelf(): boolean {
+    return (byId<HTMLSelectElement>('ha_gw_type')?.value || SELF) === SELF;
+}
+
+/**
+ * Base-ID, Host und Port aus ihren Quellen uebernehmen: die Base-ID kommt vom
+ * TCM515 (EnOcean-Reiter), der Port aus der TCP-Bridge-Einstellung, der Host
+ * aus der Adresse, unter der das Portal gerade erreicht wird. Doppelt
+ * gepflegte Felder waren die Ursache dafuer, dass der erzeugte YAML-Block
+ * andere Werte hatte als der Schnipsel im EnOcean-Reiter.
+ */
+export function syncHaGateway(): void {
+    const self = describesSelf();
+
+    const base = byId<HTMLInputElement>('ha_gw_base');
+    const host = byId<HTMLInputElement>('ha_gw_host');
+    const port = byId<HTMLInputElement>('ha_gw_port');
+
+    if (self) {
+        if (base) base.value = eoApp.doc.baseId;
+        if (host) host.value = eoApp.ctx.host();
+        if (port) port.value = String(eoApp.ctx.tcpPort());
+    }
+    for (const el of [base, host, port]) {
+        if (el) el.readOnly = self;
+    }
+
+    const isLan = (byId<HTMLSelectElement>('ha_gw_type')?.value || SELF).includes('lan');
+    for (const id of ['ha_gw_host_row', 'ha_gw_port_row']) {
+        const el = byId(id);
+        if (el) el.style.display = isLan ? '' : 'none';
+    }
+
+    const note = byId('ha_gw_note');
+    if (note) {
+        note.innerHTML = self
+            ? 'Base-ID, Hostname und Port beschreiben <b>dieses Gerät</b> und werden aus dem ' +
+              'Reiter <b>EnOcean</b> übernommen — dort ändern, nicht hier. ' +
+              (eoApp.doc.baseId
+                  ? ''
+                  : '<b>Die Base-ID fehlt noch:</b> im Reiter EnOcean auf „Lesen“ klicken.')
+            : 'Fremdes Gateway: Base-ID, Hostname und Port beschreiben hier <b>nicht</b> dieses ' +
+              'Gerät und müssen von Hand eingetragen werden.';
+    }
+}
+
 function gatewayOptions(): HaGatewayOptions {
-    const deviceType = byId<HTMLSelectElement>('ha_gw_type')?.value || 'eul_lan';
+    const deviceType = byId<HTMLSelectElement>('ha_gw_type')?.value || SELF;
     const isLan = deviceType.includes('lan');
     return {
         deviceType,
@@ -55,9 +109,10 @@ function generate(): void {
     const out = byId('ha_out');
     if (!out) return;
 
+    syncHaGateway();
     const gw = gatewayOptions();
     if (!gw.baseId) {
-        eoApp.ctx.say('Base-ID fehlt — im Reiter EnOcean auslesen und hier eintragen');
+        eoApp.ctx.say('Base-ID fehlt — im Reiter EnOcean auf „Lesen“ klicken');
     }
 
     // Zeitstempel wird in den Kopfkommentar geschrieben; lokale Zeit reicht.
@@ -81,27 +136,10 @@ function generate(): void {
 
 export function initHaTab(): void {
     const typeSel = byId<HTMLSelectElement>('ha_gw_type');
-    if (typeSel) typeSel.innerHTML = optionList(GATEWAY_TYPES, 'eul_lan');
+    if (typeSel) typeSel.innerHTML = optionList(GATEWAY_TYPES, SELF);
 
-    const host = byId<HTMLInputElement>('ha_gw_host');
-    if (host && !host.value) host.value = eoApp.ctx.host();
-    const port = byId<HTMLInputElement>('ha_gw_port');
-    if (port && !port.value) port.value = String(eoApp.ctx.tcpPort());
-
-    const base = byId<HTMLInputElement>('ha_gw_base');
-    if (base && !base.value) base.value = eoApp.doc.baseId;
-    base?.addEventListener('change', () => {
-        eoApp.doc.baseId = base.value.trim().toUpperCase();
-        eoApp.touch();
-    });
-
-    typeSel?.addEventListener('change', () => {
-        const isLan = (typeSel.value || '').includes('lan');
-        for (const id of ['ha_gw_host_row', 'ha_gw_port_row']) {
-            const el = byId(id);
-            if (el) el.style.display = isLan ? '' : 'none';
-        }
-    });
+    typeSel?.addEventListener('change', syncHaGateway);
+    syncHaGateway();
 
     byId('ha_generate')?.addEventListener('click', generate);
 

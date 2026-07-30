@@ -565,7 +565,7 @@ a { color:var(--brand); }
       <div class="eo-grid">
         <label for="ha_gw_type">Gateway-Typ</label><select id="ha_gw_type"></select>
         <label for="ha_gw_base">Base-ID</label>
-        <input type="text" id="ha_gw_base" placeholder="FF-AA-00-00" maxlength="11">
+        <input type="text" id="ha_gw_base" placeholder="im Reiter EnOcean lesen" maxlength="11">
       </div>
       <div class="eo-grid" id="ha_gw_host_row" style="margin-top:6px">
         <label for="ha_gw_host">Hostname / IP</label><input type="text" id="ha_gw_host">
@@ -576,7 +576,7 @@ a { color:var(--brand); }
       <div class="eo-grid">
         <label for="ha_gw_comment">Kommentar</label><input type="text" id="ha_gw_comment" maxlength="80">
       </div>
-      <div class="hint">Die Base-ID steht im Reiter <b>EnOcean</b> („Base-ID auslesen“). Sie ist der Anker, auf den Home Assistant die Sender-Adressen rechnet.</div>
+      <div class="hint" id="ha_gw_note"></div>
     </fieldset>
 
     <fieldset><legend>Prüfung</legend>

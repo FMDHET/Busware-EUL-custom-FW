@@ -7,7 +7,7 @@ import { EEP_CATALOG } from './eep_catalog';
 import { eoApp } from './eo/app';
 import { describeTelegram, eepFromTeachIn4bs } from './eo/eep_decode';
 import { initDevicesTab, renderTable as renderDeviceList } from './eo/ui_devices';
-import { initHaTab } from './eo/ui_ha';
+import { initHaTab, syncHaGateway } from './eo/ui_ha';
 import { initToolsTab, updateStorageInfo } from './eo/ui_tools';
 
 // -----------------------------------------------------------------------------
@@ -160,6 +160,10 @@ function activateTab(name: TabName): void {
     if (location.hash !== `#${name}`) {
         history.replaceState(null, '', `#${name}`);
     }
+    // Der HA-Reiter zeigt Base-ID/Host/Port des EnOcean-Reiters. Beim
+    // Hereinwechseln neu uebernehmen, damit z.B. ein gerade geaenderter Port
+    // dort sofort richtig steht.
+    if (name === 'ha') syncHaGateway();
 }
 
 function activeTabName(): string {
@@ -465,6 +469,7 @@ async function doReadBaseId(): Promise<void> {
     try {
         const r = await api.baseIdRead();
         byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        publishBaseId();
         out.textContent = r.writes_remaining !== undefined
             ? `Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
             : `Base-ID: ${r.base_id}`;
@@ -488,6 +493,7 @@ async function doWriteBaseId(): Promise<void> {
     try {
         const r = await api.baseIdWrite(val);
         byId<HTMLInputElement>('baseid_in').value = r.base_id;
+        publishBaseId();
         out.textContent = r.writes_remaining !== undefined
             ? `Neue Base-ID: ${r.base_id} · noch ${r.writes_remaining} Schreibzugriffe`
             : `Neue Base-ID: ${r.base_id}`;
@@ -508,6 +514,9 @@ function applyHAPreset(): void {
 function renderHAYaml(): void {
     const host = currentHost();
     const port = parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100;
+    // Die tatsaechlich gelesene Base-ID einsetzen. Frueher stand hier ein
+    // Platzhalter, der sich vom erzeugten Block im HA-Reiter unterschied.
+    const base = byId<HTMLInputElement>('baseid_in').value.trim().toUpperCase();
     const yaml =
         'eltako:\n' +
         '  gateway:\n' +
@@ -515,9 +524,23 @@ function renderHAYaml(): void {
         '      device_type: eul_lan\n' +
         `      serial_path: ${host}\n` +
         `      port: ${port}\n` +
-        '      base_id: FF-AA-00-00     # anpassen: base_id des TCM515\n';
+        (base
+            ? `      base_id: ${base}\n`
+            : '      base_id: FF-AA-00-00     # noch nicht gelesen - Knopf „Lesen" oben\n');
     byId('ha_yaml').textContent = yaml;
     byId('ha_yaml_box').style.display = 'block';
+}
+
+// Die Base-ID des TCM515 ist die einzige Quelle fuer alles, was mit
+// Sender-Adressen rechnet: HA-Export, Telegramm-Sender, PCT14. Sie wird hier
+// im EnOcean-Reiter gepflegt und von dort in den Geraete-Manager gespiegelt.
+function publishBaseId(): void {
+    const v = byId<HTMLInputElement>('baseid_in').value.trim().toUpperCase();
+    if (v === eoApp.doc.baseId) return;
+    eoApp.doc.baseId = v;
+    eoApp.touch();
+    syncHaGateway();
+    if (byId('ha_yaml_box').style.display !== 'none') renderHAYaml();
 }
 
 function renderApiDoc(token: string, enabled: boolean): void {
@@ -1166,6 +1189,13 @@ async function initEo(): Promise<void> {
         tcpPort: () => parseInt(byId<HTMLInputElement>('tcp_port').value, 10) || 5100,
         apiToken: () => (apiEnabled ? apiToken : ''),
     });
+    // Gespeicherte Base-ID ins Eingabefeld des EnOcean-Reiters zuruecklegen:
+    // sie steht dann nach jedem Portal-Aufruf da, ohne den TCM515 erneut
+    // auslesen zu muessen.
+    const baseIn = byId<HTMLInputElement>('baseid_in');
+    if (!baseIn.value && eoApp.doc.baseId) baseIn.value = eoApp.doc.baseId;
+    baseIn.addEventListener('input', publishBaseId);
+
     initDevicesTab();
     initHaTab();
     initToolsTab();
