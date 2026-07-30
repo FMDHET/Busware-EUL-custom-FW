@@ -17,6 +17,7 @@ import {
     parseAddressBytes,
     parseEsp3Radio,
     parseHexString,
+    SEGMENT_COLORS,
     splitFrame,
     telegramTypeOf,
     toHexString,
@@ -26,16 +27,6 @@ import {
 // -----------------------------------------------------------------------------
 // Telegramm senden
 // -----------------------------------------------------------------------------
-
-const SEG_COLORS: Record<string, string> = {
-    frame: 'var(--hint)',
-    crc: 'var(--hint)',
-    org: '#c47f00',
-    data: 'var(--danger)',
-    address: '#1a7f37',
-    status: '#0057b7',
-    optional: 'var(--hint)',
-};
 
 /** Läuft ein Dauer-Sendevorgang? Wird vom Stop-Knopf zurückgesetzt. */
 let repeatRemaining = 0;
@@ -75,7 +66,7 @@ function renderFrame(): void {
     box.innerHTML = splitFrame(frame)
         .map(
             (s) =>
-                `<span title="${escapeHtml(s.label)}" style="color:${SEG_COLORS[s.kind]}">${escapeHtml(s.hex)}</span>`,
+                `<span title="${escapeHtml(s.label)}" style="color:${SEGMENT_COLORS[s.kind]}">${escapeHtml(s.hex)}</span>`,
         )
         .join(' ');
 

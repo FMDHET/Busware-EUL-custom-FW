@@ -20,6 +20,7 @@ import { eepClass, eepNames, eepTitle } from './eep_decode';
 import { deviceMatchesFilter, isEmptyFilter, splitTerms } from './filter';
 import { byId, escapeHtml, fmtClock, optionList } from './dom';
 import { eoApp } from './app';
+import { MultiSelect } from './multiselect';
 import { relatedDevices, newDevice, type AddField, type EoDevice, type EoFilter } from './model';
 import { suggestHaConfig } from './suggest';
 
@@ -37,21 +38,19 @@ let onlyHa = false;
 // Filterleiste
 // -----------------------------------------------------------------------------
 
+/** Klapplisten fuer Gerätetyp und EEP (erst in initFilterBar erzeugt). */
+let typeSelect: MultiSelect | null = null;
+let eepSelect: MultiSelect | null = null;
+
 function currentFilter(): EoFilter {
     return {
         name: byId<HTMLInputElement>('eo_f_name')?.value.trim() || '',
         global: splitTerms(byId<HTMLInputElement>('eo_f_global')?.value || ''),
         address: splitTerms(byId<HTMLInputElement>('eo_f_addr')?.value || ''),
         externalAddress: splitTerms(byId<HTMLInputElement>('eo_f_ext')?.value || ''),
-        deviceType: selectedValues('eo_f_type'),
-        eep: selectedValues('eo_f_eep'),
+        deviceType: typeSelect?.value ?? [],
+        eep: eepSelect?.value ?? [],
     };
-}
-
-function selectedValues(id: string): string[] {
-    const sel = byId<HTMLSelectElement>(id);
-    if (!sel) return [];
-    return Array.from(sel.selectedOptions).map((o) => o.value).filter(Boolean);
 }
 
 function applyFilterToForm(f: EoFilter | null): void {
@@ -63,14 +62,8 @@ function applyFilterToForm(f: EoFilter | null): void {
     set('eo_f_global', (f?.global || []).join(', '));
     set('eo_f_addr', (f?.address || []).join(', '));
     set('eo_f_ext', (f?.externalAddress || []).join(', '));
-    selectValues('eo_f_type', f?.deviceType || []);
-    selectValues('eo_f_eep', f?.eep || []);
-}
-
-function selectValues(id: string, values: string[]): void {
-    const sel = byId<HTMLSelectElement>(id);
-    if (!sel) return;
-    for (const o of Array.from(sel.options)) o.selected = values.includes(o.value);
+    if (typeSelect) typeSelect.value = f?.deviceType || [];
+    if (eepSelect) eepSelect.value = f?.eep || [];
 }
 
 function refreshFilterNames(): void {
@@ -83,16 +76,19 @@ function refreshFilterNames(): void {
 }
 
 function initFilterBar(): void {
-    const typeSel = byId<HTMLSelectElement>('eo_f_type');
-    if (typeSel) typeSel.innerHTML = optionList(knownDeviceTypes(), '');
-    const eepSel = byId<HTMLSelectElement>('eo_f_eep');
-    if (eepSel) eepSel.innerHTML = optionList(eepNames(), '');
+    const typeHost = byId('eo_f_type');
+    if (typeHost) {
+        typeSelect = new MultiSelect(typeHost, 'Gerätetyp', () => renderTable());
+        typeSelect.setOptions(knownDeviceTypes());
+    }
+    const eepHost = byId('eo_f_eep');
+    if (eepHost) {
+        eepSelect = new MultiSelect(eepHost, 'EEP', () => renderTable());
+        eepSelect.setOptions(eepNames());
+    }
 
     for (const id of ['eo_f_global', 'eo_f_addr', 'eo_f_ext']) {
         byId(id)?.addEventListener('input', () => renderTable());
-    }
-    for (const id of ['eo_f_type', 'eo_f_eep']) {
-        byId(id)?.addEventListener('change', () => renderTable());
     }
     byId<HTMLInputElement>('eo_f_onlyha')?.addEventListener('change', (e) => {
         onlyHa = (e.target as HTMLInputElement).checked;

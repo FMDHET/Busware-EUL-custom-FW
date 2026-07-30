@@ -104,6 +104,21 @@ export function parseAddressBytes(s: string): number[] {
 
 export type FrameSegmentKind = 'frame' | 'org' | 'data' | 'address' | 'status' | 'crc' | 'optional';
 
+/**
+ * Farben der Frame-Abschnitte. Wird sowohl im Sende-Werkzeug als auch in der
+ * aufklappbaren Rohframe-Ansicht des Status-Reiters benutzt - dieselbe Farbe
+ * bedeutet an beiden Stellen dasselbe Feld.
+ */
+export const SEGMENT_COLORS: Record<FrameSegmentKind, string> = {
+    frame: 'var(--hint)',
+    crc: 'var(--hint)',
+    org: '#c47f00',
+    data: 'var(--danger)',
+    address: '#1a7f37',
+    status: '#0057b7',
+    optional: 'var(--hint)',
+};
+
 export interface FrameSegment {
     kind: FrameSegmentKind;
     label: string;

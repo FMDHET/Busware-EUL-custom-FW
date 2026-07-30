@@ -116,7 +116,52 @@ main {
 .eo-filter { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
 .eo-filter > div { display:flex; flex-direction:column; gap:2px; min-width:140px; }
 .eo-filter label { margin:0; font-size:0.8em; color:var(--hint); }
-.eo-filter select[multiple] { height:64px; }
+
+/* Mehrfachauswahl als Klappliste (siehe web/src/eo/multiselect.ts). Ein
+   natives <select multiple> braucht sichtbare Zeilen und ist bei 200+
+   Eintraegen unbedienbar. */
+.ms { position:relative; }
+.ms-btn {
+  width:100%;
+  text-align:left;
+  font-weight:400;
+  padding:10px 12px;
+  min-height:42px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.ms-btn.ms-active { color:var(--brand); font-weight:600; }
+.ms-panel {
+  position:absolute;
+  z-index:10;
+  top:calc(100% + 4px);
+  left:0;
+  min-width:260px;
+  max-width:min(420px, 90vw);
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.18);
+  padding:8px;
+}
+.ms-search { margin-bottom:6px; }
+.ms-list { max-height:260px; overflow-y:auto; }
+.ms-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  padding:5px 4px;
+  font-size:14px;
+  color:var(--fg);
+  border-radius:4px;
+  cursor:pointer;
+}
+.ms-item:hover { background:var(--muted); }
+.ms-item input { margin:0; flex:none; }
+.ms-foot { border-top:1px solid var(--border); margin-top:6px; padding-top:6px; }
+.ms-foot button { width:100%; min-height:32px; padding:6px; font-size:13px; }
 
 /* Farbig zerlegtes Telegramm im Sende-Werkzeug. */
 #tg_frame { font-family:ui-monospace,monospace; font-size:13px; word-break:break-all; line-height:1.8; }
@@ -397,7 +442,7 @@ a { color:var(--brand); }
           </tbody>
         </table>
       </div>
-      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Name hinter dem Absender kommt aus dem Reiter <b>Geräte</b>. Zeile anklicken zeigt den <b>ESP3-Rohframe feldweise</b>.</div>
+      <div class="hint">Dekodierte EnOcean-Funktelegramme (live, neueste oben). <code>&#8595;</code> empfangen vom TCM515 · <code>&#8593;</code> an den TCM515 gesendet. Name hinter dem Absender kommt aus dem Reiter <b>Geräte</b>. Zeile anklicken zeigt den <b>ESP3-Rohframe feldweise</b> — farbcodiert wie im Sende-Werkzeug: <span style="color:#c47f00">RORG</span>, <span style="color:var(--danger)">Daten</span>, <span style="color:#1a7f37">Sender-ID</span>, <span style="color:#0057b7">Status</span>, <span style="color:var(--hint)">Rahmen/CRC/optional</span>.</div>
     </fieldset>
 
     <fieldset><legend>TCM515-Statistik</legend>
@@ -553,8 +598,8 @@ a { color:var(--brand); }
           <input type="text" id="eo_f_global" placeholder="Begriffe, kommagetrennt"></div>
         <div><label for="eo_f_addr">Adresse</label><input type="text" id="eo_f_addr" placeholder="00-00-"></div>
         <div><label for="eo_f_ext">Externe ID</label><input type="text" id="eo_f_ext" placeholder="FF-AA-"></div>
-        <div><label for="eo_f_type">Gerätetyp</label><select id="eo_f_type" multiple></select></div>
-        <div><label for="eo_f_eep">EEP</label><select id="eo_f_eep" multiple></select></div>
+        <div><label>Gerätetyp</label><div id="eo_f_type"></div></div>
+        <div><label>EEP</label><div id="eo_f_eep"></div></div>
         <div style="min-width:auto"><label>&nbsp;</label>
           <div class="row">
             <label class="inline"><input type="checkbox" id="eo_f_onlyha"> nur HA</label>

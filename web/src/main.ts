@@ -9,6 +9,7 @@ import { describeTelegram, eepFromTeachIn4bs } from './eo/eep_decode';
 import { initDevicesTab, renderTable as renderDeviceList } from './eo/ui_devices';
 import { initHaTab, syncHaGateway } from './eo/ui_ha';
 import { initPct14Tab, initToolsTab, updateStorageInfo } from './eo/ui_tools';
+import { SEGMENT_COLORS, type FrameSegmentKind } from './eo/telegram';
 
 // -----------------------------------------------------------------------------
 // Types (spiegeln HTTP-Backend)
@@ -912,7 +913,8 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
 }
 
 // ESP3-Frame feldweise zerlegen (für die aufklappbare Rohframe-Ansicht).
-interface RawField { name: string; hex: string; }
+// Dieselbe Farbcodierung wie im Sende-Werkzeug: gleiche Farbe = gleiches Feld.
+interface RawField { name: string; hex: string; kind: FrameSegmentKind; }
 function hx1(b: number[], i: number): string {
     return i >= 0 && i < b.length ? b[i].toString(16).padStart(2, '0') : '??';
 }
@@ -925,29 +927,29 @@ function esp3Fields(b: number[]): RawField[] {
     const dataLen = (b[1] << 8) | b[2];
     const optLen = b[3];
     const type = b[4];
-    f.push({ name: 'Sync', hex: hx1(b, 0) });
-    f.push({ name: 'Data Length', hex: hxRange(b, 1, 3) });
-    f.push({ name: 'Opt. Length', hex: hx1(b, 3) });
-    f.push({ name: 'Packet Type', hex: hx1(b, 4) });
-    f.push({ name: 'CRC8H', hex: hx1(b, 5) });
+    f.push({ name: 'Sync', hex: hx1(b, 0), kind: 'frame' });
+    f.push({ name: 'Data Length', hex: hxRange(b, 1, 3), kind: 'frame' });
+    f.push({ name: 'Opt. Length', hex: hx1(b, 3), kind: 'frame' });
+    f.push({ name: 'Packet Type', hex: hx1(b, 4), kind: 'frame' });
+    f.push({ name: 'CRC8H', hex: hx1(b, 5), kind: 'crc' });
     const dataStart = 6;
     const dataEnd = 6 + dataLen;
     if (type === 1 && dataLen >= 6) {
-        f.push({ name: 'RORG', hex: hx1(b, dataStart) });
-        f.push({ name: 'Data', hex: hxRange(b, dataStart + 1, dataEnd - 5) });
-        f.push({ name: 'Sender-ID', hex: hxRange(b, dataEnd - 5, dataEnd - 1) });
-        f.push({ name: 'Status', hex: hx1(b, dataEnd - 1) });
+        f.push({ name: 'RORG', hex: hx1(b, dataStart), kind: 'org' });
+        f.push({ name: 'Data', hex: hxRange(b, dataStart + 1, dataEnd - 5), kind: 'data' });
+        f.push({ name: 'Sender-ID', hex: hxRange(b, dataEnd - 5, dataEnd - 1), kind: 'address' });
+        f.push({ name: 'Status', hex: hx1(b, dataEnd - 1), kind: 'status' });
         const os = dataEnd;
-        if (optLen >= 1) f.push({ name: 'SubTelNum', hex: hx1(b, os) });
-        if (optLen >= 5) f.push({ name: 'Destination', hex: hxRange(b, os + 1, os + 5) });
-        if (optLen >= 6) f.push({ name: 'dBm', hex: hx1(b, os + 5) });
-        if (optLen >= 7) f.push({ name: 'Security', hex: hx1(b, os + 6) });
+        if (optLen >= 1) f.push({ name: 'SubTelNum', hex: hx1(b, os), kind: 'optional' });
+        if (optLen >= 5) f.push({ name: 'Destination', hex: hxRange(b, os + 1, os + 5), kind: 'optional' });
+        if (optLen >= 6) f.push({ name: 'dBm', hex: hx1(b, os + 5), kind: 'optional' });
+        if (optLen >= 7) f.push({ name: 'Security', hex: hx1(b, os + 6), kind: 'optional' });
     } else {
-        f.push({ name: 'Data', hex: hxRange(b, dataStart, dataEnd) });
-        if (optLen > 0) f.push({ name: 'Optional', hex: hxRange(b, dataEnd, dataEnd + optLen) });
+        f.push({ name: 'Data', hex: hxRange(b, dataStart, dataEnd), kind: 'data' });
+        if (optLen > 0) f.push({ name: 'Optional', hex: hxRange(b, dataEnd, dataEnd + optLen), kind: 'optional' });
     }
     const crcd = 6 + dataLen + optLen;
-    f.push({ name: 'CRC8D', hex: hx1(b, crcd) });
+    f.push({ name: 'CRC8D', hex: hx1(b, crcd), kind: 'crc' });
     return f;
 }
 
@@ -1018,11 +1020,21 @@ function buildTelDetail(frameHex: string): HTMLTableRowElement {
         tr.innerHTML = `<td colspan="${TEL_COLS}" class="hint">Rohframe nicht verfügbar</td>`;
         return tr;
     }
-    const heads = fields.map((f) => `<th>${escapeHtml(f.name)}</th>`).join('');
-    const vals = fields.map((f) => `<td>${escapeHtml(f.hex)}</td>`).join('');
+    const color = (f: RawField) => SEGMENT_COLORS[f.kind];
+    const heads = fields
+        .map((f) => `<th style="color:${color(f)}">${escapeHtml(f.name)}</th>`)
+        .join('');
+    const vals = fields
+        .map((f) => `<td style="color:${color(f)}">${escapeHtml(f.hex)}</td>`)
+        .join('');
+    // Die Rohframe-Zeile in denselben Farben wie die Tabelle darunter - so
+    // sieht man auf einen Blick, welches Byte wozu gehoert.
+    const raw = fields
+        .map((f) => `<span title="${escapeHtml(f.name)}" style="color:${color(f)}">${escapeHtml(f.hex)}</span>`)
+        .join(' ');
     tr.innerHTML =
         `<td colspan="${TEL_COLS}"><div class="rawwrap">` +
-        `<div class="rawhex">${escapeHtml(frameHex)}</div>` +
+        `<div class="rawhex">${raw}</div>` +
         `<table class="rawtbl"><thead><tr>${heads}</tr></thead><tbody><tr>${vals}</tr></tbody></table>` +
         `</div></td>`;
     return tr;
