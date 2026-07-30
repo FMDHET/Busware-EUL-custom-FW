@@ -892,7 +892,9 @@ function decodeEsp3(ms: number, dir: string, b: number[]): Telegram | null {
     const sender = data.slice(dataLen - 5, dataLen - 1);
     const status = data[dataLen - 1];
     const payload = data.slice(1, dataLen - 5);
-    const dbm = optLen >= 6 && opt.length >= 6 ? -opt[5] : null;
+    // 0xFF = "nicht verfuegbar" (so sind gesendete Frames markiert), sonst
+    // stuende bei jedem eigenen Telegramm -255 dBm.
+    const dbm = optLen >= 6 && opt.length >= 6 && opt[5] !== 0xff ? -opt[5] : null;
     // EnOcean-Status-Byte: untere 4 Bit = Repeater-Zaehler (0 = nicht wiederholt).
     const rep = status & 0x0f;
     const rorgHex = `0x${rorg.toString(16).padStart(2, '0')}`;

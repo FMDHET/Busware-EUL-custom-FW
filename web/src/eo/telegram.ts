@@ -191,7 +191,8 @@ export function parseEsp3Radio(frame: number[]): ParsedTelegram | null {
         sender: data.slice(dataLen - 5, dataLen - 1),
         status: data[dataLen - 1],
         // Optional-Byte 5 ist die Feldstaerke, vom TCM als positiver Betrag.
-        dbm: opt.length >= 6 ? -opt[5] : null,
+        // 0xFF heisst "nicht verfuegbar" und markiert gesendete Frames.
+        dbm: opt.length >= 6 && opt[5] !== 0xff ? -opt[5] : null,
     };
 }
 

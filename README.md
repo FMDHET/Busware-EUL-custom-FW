@@ -24,7 +24,18 @@ Sicherheitsmodell.
 - **SoftAP-Provisioning bei Erstboot** mit Captive-Portal (kein Login-Prompt-Sucherei), pro Gerät zufällig generierte Credentials
 - **Auth-Handshake für TCP** (Token-basiert) — CRA "secure by default", per Toggle abschaltbar
 - **HA-Eltako-Preset**: Ein-Klick-Konfiguration für die [FMDHET/home-assistant-eltako](https://github.com/FMDHET/home-assistant-eltako) Integration (`device_type: eul_lan`)
+- **Geräte-Manager im Portal**: Inventar, EEP-Zuordnung, Home-Assistant-Export und PCT14-Import — eine Portierung von [EO-Man](https://github.com/grimmpp/enocean-device-manager) direkt im Browser
 - **Selbstheilendes NVS**: Sanity-Check beim Boot, feingranulare Setter (WiFi-Update kann Modi nicht mehr korrumpieren)
+
+[![Status-Reiter mit Live-Telegrammen](docs/screenshots/status.png)](docs/screenshots/status.png)
+
+Status-Reiter: dekodierte Funktelegramme in Echtzeit. Eine Zeile anklicken klappt
+den ESP3-Rohframe feldweise auf — farbcodiert nach RORG, Daten, Sender-ID und
+Status.
+
+> Die Screenshots zeigen die echte Oberfläche mit einem **Demo-Datenbestand**,
+> nicht eine reale Anlage. Neu erzeugen: `node scripts/screenshot_portal.mjs`
+> (braucht Google Chrome).
 
 ## Hardware
 
@@ -140,6 +151,8 @@ sichtbar.
 - Benannte, speicherbare Filter (global / Adresse / Externe ID / Typ / EEP),
   sortierbare Spalten, Signalstärke und „zuletzt gesehen" je Gerät
 
+[![Geräte-Reiter mit Inventar, Filter und Detailformular](docs/screenshots/geraete.png)](docs/screenshots/geraete.png)
+
 ### Reiter „Home Assistant"
 
 Erzeugt den kompletten `configuration.yaml`-Block für die Eltako-Integration:
@@ -147,12 +160,16 @@ Gateway-Abschnitt, Geräte nach Plattform gruppiert, Sender-IDs mit
 Base-ID-Offset verrechnet, verknüpfte Geräte als Kommentar. Vorab wird geprüft,
 ob Sender-IDs eindeutig und im gültigen Bereich 1–127 liegen.
 
+[![Erzeugte configuration.yaml für die Eltako-Integration](docs/screenshots/ha.png)](docs/screenshots/ha.png)
+
 ### Reiter „Werkzeuge"
 
 | Werkzeug | Zweck |
 |---|---|
 | **Telegramm senden** | RPS/1BS/4BS bauen, farbig zerlegter ESP3-Frame, Vorlagen, Dauersenden mit Pause/Anzahl (nutzt `/api/send`, braucht die REST-API) |
 | **EEP-Prüfer** | Rohdaten nach einem gewählten EEP in physikalische Werte umrechnen |
+
+[![Telegramm-Sender und EEP-Prüfer](docs/screenshots/werkzeuge.png)](docs/screenshots/werkzeuge.png)
 
 ### Reiter „PCT14"
 
@@ -166,6 +183,8 @@ ob Sender-IDs eindeutig und im gültigen Bereich 1–127 liegen.
 > dem RS485-Bus. Der EUL hat nur den TCM515-Funktransceiver und keinen
 > Bus-Zugang — dieselben Daten kommen hier über den **PCT14-Import**. Ebenso
 > entfallen Bus-Burst-Test und die Erkennung fremder ESP2-Gateways.
+
+[![PCT14-Import/-Export, Gerätekatalog und Sicherung](docs/screenshots/pct14.png)](docs/screenshots/pct14.png)
 
 ### HTTP-Endpunkte
 

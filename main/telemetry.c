@@ -97,7 +97,10 @@ static int format_frame(char *out, size_t cap, const uint8_t *frame, size_t len,
     const uint8_t *payload = data + 1;
     size_t         pay_len = data_len - 6;
     const uint8_t *opt     = frame + 6 + data_len;
-    int has_dbm = (opt_len >= 6 && 6 + data_len + opt_len <= len);
+    // 0xFF im dBm-Byte heisst laut ESP3-Spec "nicht verfuegbar" - so sind
+    // gesendete Frames markiert. Ohne diese Pruefung meldet das Portal fuer
+    // jedes gesendete Telegramm -255 dBm.
+    int has_dbm = (opt_len >= 6 && 6 + data_len + opt_len <= len && opt[5] != 0xFF);
     int dbm     = has_dbm ? -(int)opt[5] : 0;
 
     size_t p = 0;
