@@ -59,7 +59,7 @@ export interface EoDevice {
     rssi: number | null;
     /** RORG des letzten Telegramms (0 = unbekannt). */
     rorg: number;
-    /** Anzahl empfangener Telegramme seit dem letzten Portal-Start. */
+    /** Gesamtzahl empfangener Telegramme (wird mitgespeichert). */
     telegrams: number;
 }
 
@@ -349,5 +349,21 @@ export class DocumentStore {
         }
         const res = await fetch('/api/eo/clear', { method: 'POST' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }
+
+    /**
+     * Rettungsanker beim Verlassen bzw. Verbergen der Seite: eine Aenderung,
+     * die juenger ist als die Buendelungszeit, waere sonst verloren. fetch()
+     * bricht der Browser beim Unload ab - sendBeacon stellt er noch zu,
+     * nachdem die Seite weg ist.
+     *
+     * Rueckgabe: true, wenn etwas abgeschickt wurde.
+     */
+    flushBeacon(): boolean {
+        if (this.timer === null) return false;   // nichts offen
+        clearTimeout(this.timer);
+        this.timer = null;
+        const body = new Blob([JSON.stringify(this.getDoc())], { type: 'application/json' });
+        return navigator.sendBeacon('/api/eo', body);
     }
 }

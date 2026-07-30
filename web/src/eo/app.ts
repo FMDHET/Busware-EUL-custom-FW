@@ -64,6 +64,20 @@ class EoApp {
         }
         this.loaded = true;
         this.touch(false);
+        this.installLeaveGuard();
+    }
+
+    /**
+     * Ausstehende Aenderungen beim Tabwechsel/Schliessen noch wegschreiben.
+     * `pagehide` und `visibilitychange` sind das zuverlaessige Paar - reines
+     * `beforeunload` feuert auf Mobilgeraeten oft gar nicht.
+     */
+    private installLeaveGuard(): void {
+        const flush = () => this.store?.flushBeacon();
+        window.addEventListener('pagehide', flush);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flush();
+        });
     }
 
     devices(): EoDevice[] {
