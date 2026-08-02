@@ -2,6 +2,7 @@
 #include "board_config.h"
 #include "esp3_parser.h"
 #include "enocean_uart.h"
+#include "telemetry.h"
 
 #include <string.h>
 
@@ -19,6 +20,7 @@ static esp3_parser_t s_parser;
 static void on_frame(const uint8_t *frame, size_t len, void *user)
 {
     (void)user;
+    telemetry_note_tx(frame, len);
     (void)enocean_uart_write_frame(frame, len);
 }
 

@@ -79,6 +79,46 @@ Fix (siehe [tcp_server.c](main/tcp_server.c)):
 - RX-Task übernimmt Cleanup allein, TX exit'et nur nach `!active`
 - `shutdown(SHUT_RDWR)` sprengt blockierendes `send()` auf
 
+### Telegramm-Ring: Quelle der Statusseite ist das Gerät, nicht die Konsole
+
+Die Telegramm-Tabelle im Status-Reiter wurde ursprünglich aus dem
+Konsolen-Stream (`/api/console`) rekonstruiert — das Frontend fischte die
+Hex-Bytes aus den Logzeilen. Nachteile: die Telegramme teilten sich den
+128-Zeilen-Ring mit allen anderen Logmeldungen, lange Frames wurden auf die
+Zeilenlänge (160 Zeichen) gekappt, und nach einem Reload des Portals war die
+Historie praktisch weg.
+
+Jetzt ist [telemetry.c](main/telemetry.c) der Ringpuffer für die letzten
+`EUL_TEL_RING` (= 100) Telegramme **beider Richtungen**, und die Statusseite
+zieht ihn über `GET /api/telegrams?since=<seq>` inkrementell nach. Details:
+
+- **Cursor statt Vollabzug.** Jeder Eintrag trägt ein monotones `seq`; der
+  Client schickt das größte zurück. Ohne `since` kommt der ganze Ring.
+- **Chunked statt Puffer.** Der volle Ring sind ~20 KB JSON — der alte
+  `static char out[8192]` hätte ihn abgeschnitten. `telemetry_dump_json_stream()`
+  streamt Eintrag für Eintrag, der Mutex wird pro Eintrag genommen und wieder
+  freigegeben (`emit()` schreibt auf den Socket und darf den UART-RX-Task nicht
+  blockieren).
+- **Zwei Auth-Wege auf `/api/telegrams`.** Geräte-Token (nur wenn die REST-API
+  freigeschaltet ist) **oder** Portal-Basic-Auth. Sonst wäre die Telegramm-
+  Tabelle davon abhängig, ob der Nutzer die externe REST-API eingeschaltet hat.
+  Reihenfolge im Handler beachten: `check_basic_auth()` beantwortet die Anfrage
+  bei Misserfolg selbst mit 401, also **zuerst** den Token prüfen.
+- **Kein Doppel-Poll.** `pollConsole()` läuft nur noch auf dem Konsolen-Reiter,
+  `pollTelegrams()` nur auf Status und Geräte. Kein Reiter fragt beide
+  Endpunkte ab.
+- **TX kommt aus den Sendepfaden.** `telemetry_note_tx()` steht an denselben
+  drei Stellen wie `console_log_frame_from()` (tcp_server, usb_cdc_gateway,
+  `/api/send`).
+- **Frames > `EUL_TEL_FRAME_MAX` (96 B) landen nicht im Ring.** Halb gespeichert
+  wären sie nicht dekodierbar. Jedes ERP1-Funktelegramm passt locker; verkettete
+  bzw. Remote-Management-Frames sieht man weiterhin in der Konsole.
+
+Nicht-RADIO-Pakete (RESPONSE, Common Command …) sind mit drin — die Spalte
+„Typ" zeigt sie, und beim Debuggen der TCM-Kommunikation sind genau sie
+interessant. Für sie sind `rorg`/`sender` leere Strings (nicht `null`), damit
+Fremd-Consumer der REST-API weiter mit String-Feldern rechnen können.
+
 ### HTTPD-Konfig für Multi-Client-Polling
 Das Portal pollt alle 500 ms `/api/console`. Mit HTTPD-Defaults
 (`max_open_sockets=7`, kein `lru_purge`, kein Keep-Alive) waren Sockets im

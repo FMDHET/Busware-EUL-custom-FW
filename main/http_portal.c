@@ -766,18 +766,73 @@ static esp_err_t api_reject(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"error\":\"api disabled or invalid token\"}");
 }
 
-// GET /api/telegrams -> letzte empfangene Telegramme als JSON-Array
+// Gepufferte Senke fuer den Telemetrie-Dump: sammelt die Haeppchen und schickt
+// sie als HTTP-Chunks raus. Statisch, weil der HTTP-Server seine Handler in
+// genau einer Task nacheinander abarbeitet - und weil 1 KB auf dem
+// Handler-Stack knapp waere.
+typedef struct {
+    httpd_req_t *req;
+    size_t       n;
+    char         buf[1024];
+} tel_sink_t;
+
+static tel_sink_t s_tel_sink;
+
+static int tel_flush(tel_sink_t *s)
+{
+    if (!s->n) return 0;
+    esp_err_t r = httpd_resp_send_chunk(s->req, s->buf, s->n);
+    s->n = 0;
+    return (r == ESP_OK) ? 0 : -1;
+}
+
+static int tel_emit(void *user, const char *chunk, size_t len)
+{
+    tel_sink_t *s = (tel_sink_t *)user;
+    while (len) {
+        if (s->n == sizeof(s->buf) && tel_flush(s) < 0) return -1;
+        size_t take = sizeof(s->buf) - s->n;
+        if (take > len) take = len;
+        memcpy(s->buf + s->n, chunk, take);
+        s->n  += take;
+        chunk += take;
+        len   -= take;
+    }
+    return 0;
+}
+
+// GET /api/telegrams[?since=<seq>] -> Telegramme als JSON-Array, aelteste
+// zuerst. Ohne "since" der komplette Ring, mit "since" nur was seither dazukam
+// (so pollt die Portal-Statusseite). Jeder Eintrag traegt sein "seq" - der
+// Client nimmt das groesste als naechsten Cursor.
+//
+// Zwei Wege rein: der Geraete-Token (nur wenn die REST-API freigeschaltet
+// ist) ODER die Portal-Anmeldung. Letzteres, weil die Telegramm-Tabelle im
+// Portal aus genau diesem Ring gespeist wird und nicht davon abhaengen darf,
+// ob der Nutzer die externe REST-API eingeschaltet hat.
 static esp_err_t h_telegrams(httpd_req_t *req)
 {
     eul_config_t cfg;
     if (config_load(&cfg) != ESP_OK) { httpd_resp_send_500(req); return ESP_FAIL; }
-    if (!api_authorized(req, &cfg)) return api_reject(req);
+    // Token zuerst pruefen: check_basic_auth() beantwortet die Anfrage bei
+    // Misserfolg selbst (401), danach darf nichts mehr gesendet werden.
+    if (!api_authorized(req, &cfg) && !check_basic_auth(req, &cfg)) return ESP_OK;
 
-    static char out[8192];
-    int n = telemetry_dump_json(out, sizeof(out));
-    if (n < 0) { httpd_resp_send_500(req); return ESP_FAIL; }
+    uint64_t since = 0;
+    char qbuf[64];
+    if (httpd_req_get_url_query_str(req, qbuf, sizeof(qbuf)) == ESP_OK) {
+        char val[32];
+        if (httpd_query_key_value(qbuf, "since", val, sizeof(val)) == ESP_OK) {
+            since = strtoull(val, NULL, 10);
+        }
+    }
+
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, out, n);
+    s_tel_sink.req = req;
+    s_tel_sink.n   = 0;
+    if (telemetry_dump_json_stream(since, tel_emit, &s_tel_sink) < 0) return ESP_FAIL;
+    if (tel_flush(&s_tel_sink) < 0) return ESP_FAIL;
+    return httpd_resp_send_chunk(req, NULL, 0);   // Chunked-Response abschliessen
 }
 
 // POST /api/send  Body {"hex":"55...."} -> ESP3-Frame an den TCM515
@@ -811,7 +866,10 @@ static esp_err_t h_send(httpd_req_t *req)
     // In die Web-Konsole spiegeln, damit ueber die REST-API gesendete Frames
     // dort genauso sichtbar sind wie die der TCP-Clients - sonst fehlt beim
     // Debuggen ausgerechnet die eigene Sende-Richtung.
-    if (w == ESP_OK) console_log_frame_from("REST-API", frame, nf);
+    if (w == ESP_OK) {
+        console_log_frame_from("REST-API", frame, nf);
+        telemetry_note_tx(frame, nf);
+    }
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, w == ESP_OK ? "{\"ok\":true}" : "{\"ok\":false}");
 }

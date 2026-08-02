@@ -29,9 +29,10 @@ Sicherheitsmodell.
 
 [![Status-Reiter mit Live-Telegrammen](docs/screenshots/status.png)](docs/screenshots/status.png)
 
-Status-Reiter: dekodierte Funktelegramme in Echtzeit. Eine Zeile anklicken klappt
-den ESP3-Rohframe feldweise auf — farbcodiert nach RORG, Daten, Sender-ID und
-Status.
+Status-Reiter: dekodierte Funktelegramme in Echtzeit. Das Gerät hält die letzten
+**100 Telegramme** in einem Ringpuffer — die Liste ist also auch nach einem
+Neuladen des Portals noch da. Eine Zeile anklicken klappt den ESP3-Rohframe
+feldweise auf — farbcodiert nach RORG, Daten, Sender-ID und Status.
 
 > Die Screenshots zeigen die echte Oberfläche mit einem **Demo-Datenbestand**,
 > nicht eine reale Anlage. Neu erzeugen: `node scripts/screenshot_portal.mjs`

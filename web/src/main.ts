@@ -97,6 +97,17 @@ interface EventResp {
     last_seq: number;
 }
 
+// Ein Eintrag aus dem Telegramm-Ringpuffer der Firmware (GET /api/telegrams).
+// Die Anzeige dekodiert selbst aus "raw" - rorg/sender/data/text sind fuer
+// Fremdnutzer der REST-API da und hier bewusst ungenutzt.
+interface TelLine {
+    seq: number;
+    dir: 'rx' | 'tx';
+    ms: number;
+    ts: number;   // epoch ms (0 = nicht synchron)
+    raw: string;  // kompletter ESP3-Frame als Hex ohne Trenner
+}
+
 interface SaveBody {
     tcp_enabled: boolean;
     tcp_port: number;
@@ -284,6 +295,7 @@ const api = {
     stats: (): Promise<Stats> => apiJson('/api/stats'),
     console: (since: number): Promise<ConsoleResp> => apiJson(`/api/console?since=${since}`),
     events: (since: number): Promise<EventResp> => apiJson(`/api/events?since=${since}`),
+    telegrams: (since: number): Promise<TelLine[]> => apiJson(`/api/telegrams?since=${since}`),
     save: (body: SaveBody): Promise<{ ok: boolean }> =>
         apiJson('/api/config', {
             method: 'POST',
@@ -563,9 +575,11 @@ function renderApiDoc(token: string, enabled: boolean): void {
     const host = currentHost();
     byId('api_doc').textContent =
         (enabled ? '' : '# API ist derzeit deaktiviert\n\n') +
-        `GET  http://${host}/api/telegrams\n` +
+        `GET  http://${host}/api/telegrams[?since=<seq>]\n` +
         `     Header: Authorization: Bearer ${token}\n` +
-        `     -> letzte empfangene Telegramme (JSON-Array)\n\n` +
+        `     -> die letzten ${TELE_MAX} Telegramme (JSON-Array, älteste zuerst).\n` +
+        `        Mit "since" nur die Einträge mit größerer "seq" — zum Pollen\n` +
+        `        das größte "seq" der Antwort als nächstes "since" schicken.\n\n` +
         `POST http://${host}/api/send\n` +
         `     Header: Authorization: Bearer ${token}\n` +
         `     Body:   {"hex":"55...."}   (kompletter ESP3-Frame)\n\n` +
@@ -786,10 +800,17 @@ async function pollStats(): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
-// Telegramm-Feed: dekodiert die ESP3-Frames aus dem Konsolen-Stream und zeigt
-// sie im Status-Reiter als Tabelle (Absender / RORG / Daten / dBm).
+// Telegramm-Feed: holt den Telegramm-Ringpuffer der Firmware ab
+// (GET /api/telegrams?since=<seq>) und zeigt ihn im Status-Reiter als Tabelle
+// (Absender / RORG / Daten / dBm).
+//
+// Quelle ist bewusst der Ring im Geraet und nicht mehr der Konsolen-Stream:
+// dort teilten sich die Telegramme den Puffer mit Logzeilen, lange Frames
+// wurden auf die Zeilenlaenge gekappt, und nach einem Reload des Portals war
+// die Historie praktisch weg. Der Ring haelt die letzten EUL_TEL_RING
+// Telegramme (siehe main/telemetry.h) - auch ueber Reload und Reiterwechsel.
 // -----------------------------------------------------------------------------
-const TELE_MAX = 60;
+const TELE_MAX = 100; // muss zu EUL_TEL_RING in main/telemetry.h passen
 const DIR_RX = '↓'; // empfangen vom TCM515
 const DIR_TX = '↑'; // an den TCM515 gesendet
 
@@ -860,16 +881,16 @@ function fmtEnoceanId(arr: number[]): string {
     return arr.map((x) => x.toString(16).padStart(2, '0').toUpperCase()).join('-');
 }
 
-// Hex-Bytes aus einer Konsolenzeile "<prefix> : aa bb cc (NB)" ziehen.
-function frameBytesFromLine(line: string): number[] | null {
-    const ci = line.indexOf(' : ');
-    if (ci < 0) return null;
+// Hex-String ohne Trenner ("5500070701...") -> Bytes. So liefert die Firmware
+// das Feld "raw" jedes Ring-Eintrags.
+function hexToBytes(hex: string): number[] {
     const bytes: number[] = [];
-    for (const tok of line.slice(ci + 3).trim().split(/\s+/)) {
-        if (/^[0-9a-fA-F]{2}$/.test(tok)) bytes.push(parseInt(tok, 16));
-        else break; // "(14B)" oder "..." beendet den Hex-Teil
+    for (let i = 0; i + 1 < hex.length; i += 2) {
+        const b = parseInt(hex.slice(i, i + 2), 16);
+        if (Number.isNaN(b)) break;
+        bytes.push(b);
     }
-    return bytes.length ? bytes : null;
+    return bytes;
 }
 
 // Minimaler ESP3-Parser (nur so weit wie fuer die Anzeige noetig).
@@ -980,17 +1001,15 @@ function renderTelegramRow(t: Telegram): string {
     );
 }
 
-// Baut aus einem Batch Konsolenzeilen die Telegramm-Zeilen und haengt sie oben
-// an. Wird aus pollConsole gespeist (KEIN eigener HTTP-Poll mehr - sonst wird
-// /api/console doppelt abgefragt und die WebUI ueber die WiFi-Strecke traege).
-function renderTelegramLines(lines: ConsoleLine[]): void {
+// Baut aus einem Batch Ring-Eintraege die Telegramm-Zeilen und haengt sie oben
+// an (neueste zuerst). Die Tabelle selbst ist der sichtbare Ring: aelteste
+// Zeile faellt raus, sobald TELE_MAX ueberschritten ist.
+function renderTelegramLines(lines: TelLine[]): void {
     const rows: string[] = [];
     for (const l of lines) {
-        const dir = l.line.startsWith('<') ? DIR_RX : l.line.startsWith('>') ? DIR_TX : '';
-        if (!dir) continue;
-        const bytes = frameBytesFromLine(l.line);
-        if (!bytes) continue;
-        const t = decodeEsp3(l.ms, dir, bytes);
+        const bytes = hexToBytes(l.raw);
+        if (!bytes.length) continue;
+        const t = decodeEsp3(l.ms, l.dir === 'tx' ? DIR_TX : DIR_RX, bytes);
         if (t) rows.push(renderTelegramRow(t));
     }
     if (!rows.length) return;
@@ -1007,6 +1026,30 @@ function renderTelegramLines(lines: ConsoleLine[]): void {
         mains = body.querySelectorAll<HTMLTableRowElement>('tr.tel-row');
     }
     applyTelegramFilter();
+}
+
+let telSeq = 0;
+
+// Telegramm-Ring inkrementell nachziehen. Laeuft auf dem Status- und dem
+// Geraete-Reiter (dort haengen Signal und "zuletzt gesehen" daran); der
+// Konsolen-Reiter braucht ihn nicht - so pollt nie ein Reiter beide
+// Endpunkte gleichzeitig.
+async function pollTelegrams(): Promise<void> {
+    const tab = activeTabName();
+    if (tab !== 'status' && tab !== 'geraete') return;
+    try {
+        const list = await api.telegrams(telSeq);
+        if (!list.length) return;
+        // Antwort kommt aelteste-zuerst -> der letzte Eintrag ist der Cursor.
+        telSeq = list[list.length - 1].seq;
+        renderTelegramLines(list);
+        // Signal und "Zuletzt gesehen" aendern sich mit jedem Telegramm, loesen
+        // aber bewusst kein Speichern aus - deshalb hier explizit neu zeichnen,
+        // und nur wenn der Reiter auch sichtbar ist.
+        if (tab === 'geraete') renderDeviceList();
+    } catch {
+        // silent
+    }
 }
 
 const TEL_COLS = 8; // Spaltenzahl der Telegramm-Tabelle (fuer colspan der Detailzeile)
@@ -1059,19 +1102,13 @@ let conPaused = false;
 async function pollConsole(): Promise<void> {
     // Nur abfragen, wenn eine Ansicht die Daten wirklich braucht - spart der
     // WiFi-Strecke und dem kleinen HTTP-Server des ESP32 unnoetige Requests.
-    const tab = activeTabName();
-    if (tab !== 'status' && tab !== 'konsole' && tab !== 'geraete') return;
+    // Die Telegramm-Tabelle haengt nicht mehr hier dran, die zieht ihren
+    // eigenen Ring ueber /api/telegrams (siehe pollTelegrams).
+    if (activeTabName() !== 'konsole') return;
     try {
         const j = await api.console(conSeq);
         conSeq = j.last_seq;
         if (!j.lines.length) return;
-
-        // Telegramm-Tabelle (Status) immer fuellen, unabhaengig von der Pause.
-        renderTelegramLines(j.lines);
-        // Signal und "Zuletzt gesehen" aendern sich mit jedem Telegramm, loesen
-        // aber bewusst kein Speichern aus - deshalb hier explizit neu zeichnen,
-        // und nur wenn der Reiter auch sichtbar ist.
-        if (tab === 'geraete') renderDeviceList();
 
         // Rohe Konsole nur schreiben, wenn nicht pausiert.
         if (conPaused) return;
@@ -1285,10 +1322,12 @@ function init(): void {
     setInterval(pollClients, 3000);
     setInterval(pollStats, 3000);
     setInterval(pollConsole, 1000);
+    setInterval(pollTelegrams, 1000);
     setInterval(pollEvents, 2000);
     void pollClients();
     void pollStats();
     void pollConsole();
+    void pollTelegrams();
     void pollEvents();
 }
 

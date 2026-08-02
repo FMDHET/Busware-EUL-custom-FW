@@ -7,6 +7,7 @@
 #include "security.h"
 #include "console_log.h"
 #include "event_log.h"
+#include "telemetry.h"
 
 #include <string.h>
 #include <errno.h>
@@ -139,6 +140,7 @@ static void on_esp3_frame(const uint8_t *frame, size_t len, void *user)
         c->rx_frames++;
         console_log_frame_from(c->peer, frame, len);
     }
+    telemetry_note_tx(frame, len);
     (void)enocean_uart_write_frame(frame, len);
 }
 
